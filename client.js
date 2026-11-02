@@ -421,34 +421,22 @@ window.__ModuleLoader__.load({
         // 打开期间让宿主的那一行（和列表）让位。
         // 除了写属性给 CSS 用，这里还直接改内联样式 —— 属性选择器一旦因为
         // 宿主结构变动而失配，内联样式仍然能把标题行藏住，不会两层叠在一起。
+        // 让位完全通过属性 + 样式表完成，不碰宿主节点的 style。
+        // 之前这里是 hideNode() 直接写 el.style.visibility：
+        //   1. 违反 practices.md「不得写 slot 外的 DOM」；
+        //   2. 宿主 React 重渲染时会把内联样式覆盖回去，还原时我们又把
+        //      自己之前记录的旧值写回去，两边互相打架，肉眼表现是
+        //      "偶尔标题行闪回来一下"。
+        // 现在只 setAttribute / removeAttribute 自己的标记，让 CSS 去隐藏。
         useEffect(() => {
           const node = document.querySelector(SEL_SIDEBAR);
           if (!node) return undefined;
           const hasQuery = query.trim() !== '';
           if (!isOpen) node.removeAttribute('data-wf-open');
           else node.setAttribute('data-wf-open', hasQuery ? 'all' : 'head');
-
-          // 被隐藏的宿主节点，关闭时逐个还原
-          const touched = [];
-          const hideNode = (el) => {
-            if (!el) return;
-            touched.push([el, el.style.visibility]);
-            el.style.visibility = 'hidden';
-          };
-          if (isOpen) {
-            hideNode(node.querySelector('[class*="_sectionHeader"]'));
-            if (hasQuery) {
-              hideNode(node.querySelector('[class*="_listArea"]'));
-              hideNode(node.querySelector('[class*="_treeBody"]'));
-              hideNode(node.querySelector('[class*="_groupSection"]'));
-            }
-          }
           return () => {
             const current = document.querySelector(SEL_SIDEBAR);
             if (current) current.removeAttribute('data-wf-open');
-            touched.forEach(([el, previous]) => {
-              el.style.visibility = previous || '';
-            });
           };
         }, [isOpen, query]);
 
@@ -1630,16 +1618,19 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
    只有查询非空（deriveSearchResults 里 if (q === "") return items:[]）才切换成结果列表。
    我们没有标题行插槽，所以把原有的标题行藏掉、用输入行占它的位置。 */
 /* head：只藏标题行，会话列表保留 —— 这是刚展开、还没输入时的状态 */
-/* 注意：data-wf-open 加在 [data-slot="sidebar"] 这个元素自身上，
-   所以必须写成复合选择器（中间不能有空格），否则后代选择器永远匹配不到。 */
-[data-slot="sidebar"][data-wf-open="head"] [class*="_sectionHeader"] {
+/* 注意：data-wf-open 加在侧边栏根节点自身上，所以这里用
+   [data-wf-open="..."] 的属性选择器向后代匹配即可。
+   故意不写 [data-slot="sidebar"] 前缀 —— 那个属性是宿主渲染器给的，
+   一旦哪天改了写法，整条规则会静默失效；而我们自己 setAttribute 的
+   data-wf-open 一定在，从它出发匹配最稳。 */
+[data-wf-open="head"] [class*="_sectionHeader"] {
   visibility: hidden;
 }
 /* all：连列表一起让位 —— 有查询时结果区要接在输入行下面占住列表的位置 */
-[data-slot="sidebar"][data-wf-open="all"] [class*="_sectionHeader"],
-[data-slot="sidebar"][data-wf-open="all"] [class*="_listArea"],
-[data-slot="sidebar"][data-wf-open="all"] [class*="_treeBody"],
-[data-slot="sidebar"][data-wf-open="all"] [class*="_groupSection"] {
+[data-wf-open="all"] [class*="_sectionHeader"],
+[data-wf-open="all"] [class*="_listArea"],
+[data-wf-open="all"] [class*="_treeBody"],
+[data-wf-open="all"] [class*="_groupSection"] {
   visibility: hidden;
 }
 /* 紧凑态（空查询）：只有一行输入框，没有页签和结果区 */
@@ -2038,26 +2029,77 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
       };
     }
 
+    // #region 运行时 CSS 变量（不写宿主 DOM）
     /**
-     * 把 Config 里的尺寸写成 CSS 变量，让样式表里的
+     * 运行时算出来的尺寸变量，统一放进**我们自己的**一张 <style> 里。
+     *
+     * 之前是 `documentElement.style.setProperty('--wf-...', ...)` 直接写
+     * 宿主根元素的内联样式。问题是 documentElement 归宿主所有：主题切换、
+     * 缩放重算、窗口最大化这些操作宿主都会重设它的 style，我们的变量
+     * 会跟着一起被清掉，而且没有任何通知 —— 表现就是"用着用着工作区
+     * 高度限制没了"。改成自己维护一张样式表后，变量和规则同源、同生命周期，
+     * 宿主动不到。
+     *
+     * practices.md 明确禁止写 slot 外的 DOM；往 document.head 里放一张
+     * 带自己标记的 <style> 是官方认可的写样式方式（dsh-ui-harmonizer、
+     * 宿主自己的 WorkspaceBrowser.module.css 都这么做），和改宿主节点的
+     * 内联 style 是两回事。
+     */
+    const runtimeVars = new Map();
+    let varsStyle = null;
+    let varsDisposed = false;
+    function flushVars() {
+      try {
+        // teardown 之后不再重建样式表：卸载顺序不保证，如果 applyVars 的
+        // 清理在 teardown 之后才跑，setVar(..., null) 会把一个空的
+        // <style> 又造出来，等于留个孤儿标签在 head 里。
+        if (varsDisposed) return;
+        if (!varsStyle) {
+          if (typeof document === 'undefined' || !document.head) return;
+          if (runtimeVars.size === 0) return;
+          varsStyle = document.createElement('style');
+          varsStyle.setAttribute('data-wf-vars', '');
+          document.head.appendChild(varsStyle);
+        }
+        if (runtimeVars.size === 0) {
+          varsStyle.textContent = '';
+          return;
+        }
+        const body = Array.from(runtimeVars.entries())
+          .map(([name, value]) => `  ${name}: ${value};`)
+          .join('\n');
+        varsStyle.textContent = `:root {\n${body}\n}\n`;
+      } catch { /* 忽略 */ }
+    }
+    function setVar(name, value) {
+      if (varsDisposed) return;
+      if (value == null) runtimeVars.delete(name);
+      else runtimeVars.set(name, value);
+      flushVars();
+    }
+    function teardownVars() {
+      varsDisposed = true;
+      runtimeVars.clear();
+      try {
+        if (varsStyle && varsStyle.parentNode) varsStyle.parentNode.removeChild(varsStyle);
+      } catch { /* 忽略 */ }
+      varsStyle = null;
+    }
+    // #endregion
+
+    /**
+     * 把 Config 里的尺寸变成 CSS 变量，让样式表里的
      * var(--wf-region-min) / var(--wf-panel-max) 真正跟着配置走。
      */
     function applyVars(config) {
-      const root = typeof document !== 'undefined' ? document.documentElement : null;
-      if (!root || !root.style) return undefined;
+      if (typeof document === 'undefined') return undefined;
       const min = Number(config && config.workspaceMinHeight);
       const maxVh = Number(config && config.panelListMaxHeightVh);
-      const applied = [];
-      if (Number.isFinite(min) && min > 0) {
-        root.style.setProperty('--wf-region-min', `${min}px`);
-        applied.push('--wf-region-min');
-      }
-      if (Number.isFinite(maxVh) && maxVh > 0) {
-        root.style.setProperty('--wf-panel-max', `${maxVh}vh`);
-        applied.push('--wf-panel-max');
-      }
+      if (Number.isFinite(min) && min > 0) setVar('--wf-region-min', `${min}px`);
+      if (Number.isFinite(maxVh) && maxVh > 0) setVar('--wf-panel-max', `${maxVh}vh`);
       return () => {
-        applied.forEach((name) => root.style.removeProperty(name));
+        setVar('--wf-region-min', null);
+        setVar('--wf-panel-max', null);
       };
     }
     /**
@@ -2071,8 +2113,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
      * 而锚点宽度还受滚动条、内边距、外边距共同影响，算不如量。
      */
     function measureMoreAnchor() {
-      const root0 = typeof document !== 'undefined' ? document.documentElement : null;
-      if (!root0 || !root0.style) return undefined;
+      if (typeof document === 'undefined') return undefined;
       let observer = null;
       let timer = 0;
       let watched = null;
@@ -2085,7 +2126,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
           if (!anchor) return false;
           const r = anchor.getBoundingClientRect();
           if (!(r.width > 0)) return false;
-          root0.style.setProperty('--wf-more-w', Math.round(r.width) + 'px');
+          setVar('--wf-more-w', Math.round(r.width) + 'px');
           if (typeof ResizeObserver === 'function' && watched !== anchor) {
             try {
               if (watched && observer) observer.unobserve(watched);
@@ -2121,7 +2162,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
         try { if (timer) window.clearInterval(timer); } catch { /* 忽略 */ }
         if (observer) { try { observer.disconnect(); } catch { /* 忽略 */ } }
         try { if (hasEvent) window.removeEventListener('resize', write); } catch { /* 忽略 */ }
-        try { root0.style.removeProperty('--wf-more-w'); } catch { /* 忽略 */ }
+        setVar('--wf-more-w', null);
       };
     }
     // #endregion
@@ -2386,6 +2427,10 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
             hiddenIds.clear();
           };
         }, 'sidebar-finder: collapse');
+
+        // 运行时变量样式表的收尾。放在最后一个 effect，卸载顺序上意味着
+        // 前面的 effect 已经把自己的变量项删干净了，这里只需要摘掉 <style>。
+        ctx.effect(() => () => teardownVars(), 'sidebar-finder: vars-teardown');
 
         // 「更多」里补出被收纳的面板，并在菜单打开时同步一次官方 pin 状态
         const MorePanels = makeMorePanels(() => hiddenIds, () => visible, config);
