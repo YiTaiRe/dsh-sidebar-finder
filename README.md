@@ -54,7 +54,7 @@ cp -r packages/dsh-sidebar-finder "$DSH_PROFILE_DIR/vendor/"
 `dependencies` 里不声明它，pnpm 就不知道有这个包，也就不会去动它；但宿主仍能解析，
 因为 `resolveBundleDir` 用的是 `createRequire(profile/package.json).resolve.paths()`
 逐级查找 `node_modules` 目录，只要目录真实存在就能找到（已验证返回
-`C:\Users\YiTai\.dsh\profiles\desktop\node_modules\@local\dsh-sidebar-finder`）。
+`<profile>/node_modules/@local/dsh-sidebar-finder`）。
 
 **风险提示**：pnpm 在 `nodeLinker: hoisted` 模式下，理论上仍可能把 `node_modules` 里
 「不在 lockfile 中」的目录当垃圾清掉。现在它是真实目录（不是链接），**被删也只丢副本，
@@ -63,7 +63,7 @@ cp -r packages/dsh-sidebar-finder "$DSH_PROFILE_DIR/vendor/"
 ## 改完代码怎么让它生效
 
 ```bash
-cd E:/DeepseekHarnessWorkStation/TraeWorkStation
+cd <项目根>
 node scripts/sync-plugin.mjs
 ```
 
@@ -138,7 +138,7 @@ bash scripts/push.sh "你的提交说明"
 
 **为什么不能直接 `git push`**（三个环境坑，脚本已全部绕过）：
 
-1. Git 默认临时目录 `C:\Users\YiTai\AppData\Local\Temp\...` 在本环境不可写，
+1. Git 默认临时目录 `<系统临时目录>\...` 在本环境不可写，
    会报「对路径 ...system-commandline-sentinel-files 的访问被拒绝」→ 脚本把
    `TMPDIR`/`TEMP`/`TMP` 全部指到 `_tmp/gittmp`。
 2. 全局 `~/.gitconfig` 只读，装不了 credential helper → 脚本改用 `gh auth token`
