@@ -125,3 +125,25 @@ node scripts/sync-plugin.mjs
   且 pin 状态是纯内存、重启重置。
 - 消息定位靠 `[data-chat-turn="N"]` DOM 锚点，太旧未渲染的消息只能切会话不能滚动定位。
 - 选择器匹配的是宿主哈希类名（`[class*="_sectionHeader"]` 等），宿主大改版可能失效。
+
+## 本地开发与推送
+
+改完代码后，在项目根目录执行：
+
+```bash
+bash scripts/push.sh "你的提交说明"
+```
+
+脚本会依次完成三件事：先 `git add -A`，再自动提交，最后推送到 GitHub。
+
+**为什么不能直接 `git push`**（三个环境坑，脚本已全部绕过）：
+
+1. Git 默认临时目录 `C:\Users\YiTai\AppData\Local\Temp\...` 在本环境不可写，
+   会报「对路径 ...system-commandline-sentinel-files 的访问被拒绝」→ 脚本把
+   `TMPDIR`/`TEMP`/`TMP` 全部指到 `_tmp/gittmp`。
+2. 全局 `~/.gitconfig` 只读，装不了 credential helper → 脚本改用 `gh auth token`
+   取令牌，通过 `-c http.extraheader` 临时注入，不写任何全局配置。
+3. MSYS 会把 `/user` 这类参数改写成 Windows 路径 → 脚本设置
+   `MSYS_NO_PATHCONV=1` 和 `MSYS2_ARG_CONV_EXCL='*'`。
+
+只推送已有提交（不新建提交）：`bash scripts/push.sh --no-commit`
