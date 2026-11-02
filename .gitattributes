@@ -1,0 +1,7 @@
+# 统一按 LF 存储，避免 Windows 上 checkout 后把换行改掉
+* text=auto eol=lf
+*.svg text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.js text eol=lf
+*.md text eol=lf
