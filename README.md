@@ -2,7 +2,37 @@
 
 DSH 侧边栏改造插件：面板收纳 + 工作区标题行内联查找（文件 / 会话消息）。
 
-## 安装形态（重要，改动前务必读完）
+
+## 当前状态：已从 profile 注销
+
+2026-11-02：因为 pnpm 无法在本环境运行（全局 store 锁被占用），插件**已从 profile 完全注销**，
+以免影响其它插件的更新。注销内容：
+
+- profile `package.json`：移除 `dependencies` 与 `dsh.profile.bundles` 里的登记
+- profile `cordis.patch.yml`：移除 `insert: sidebar-finder` 整段（47 行）
+- 删除 `node_modules/@local/` 与 `vendor/`
+
+源码与三份防护**全部保留**，随时可重新安装。
+
+### 重新安装的正确姿势
+
+**不要**再用 `link:` 或 junction —— 那是上次源码被删的原因。
+
+等 pnpm 可用后（关闭所有 DSH 进程再跑）：
+
+```bash
+# 1) 源码放进 profile 内的 vendor/（pnpm 不管理这里）
+cp -r packages/dsh-sidebar-finder "$DSH_PROFILE_DIR/vendor/"
+# 2) 声明为 file: 依赖，让 pnpm 写进 lockfile（关键）
+#    在 profile/package.json 的 dependencies 加：
+#    "@local/dsh-sidebar-finder": "file:vendor/dsh-sidebar-finder"
+# 3) 把包名加回 dsh.profile.bundles
+# 4) 跑 pnpm install，让 pnpm 自己建立 node_modules 链接
+```
+
+第 4 步是关键：让 **pnpm 自己**建链接，它就认得这个包，不会再当垃圾清理。
+
+安装形态（重要，改动前务必读完）
 
 这个插件**不是**用 `link:` 或 junction 装的。原因是一次真实事故：
 
