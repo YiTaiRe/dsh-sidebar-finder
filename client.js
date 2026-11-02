@@ -122,25 +122,37 @@ window.__ModuleLoader__.load({
      * 只用宿主导出的结构标记；量不到时回退到居中卡片。
      */
     function measureRegion() {
+      const why = (reason, extra) => {
+        try {
+          window.__wfDiag = Object.assign({ reason, at: Date.now() }, extra || {});
+        } catch { /* 忽略 */ }
+        return null;
+      };
       try {
         const root = document.querySelector(SEL_SIDEBAR);
-        if (!root) return null;
+        if (!root) return why('no-sidebar-root', { sel: SEL_SIDEBAR });
         const region = root.querySelector('[class*="_regionArea"]');
-        if (!region) return null;
+        if (!region) {
+          const classes = Array.from(root.querySelectorAll('*')).slice(0, 40)
+            .map((el) => el.className && String(el.className)).filter(Boolean);
+          return why('no-region-area', { sample: classes });
+        }
         const r = region.getBoundingClientRect();
-        if (r.width < 80 || r.height < 80) return null;
+        if (r.width < 80 || r.height < 80) {
+          return why('region-too-small', { w: Math.round(r.width), h: Math.round(r.height) });
+        }
         // 标题行（sectionHeader）也在这个矩形里。原生是「标题行原位变成输入框」，
         // 所以把矩形拆成两段：head 精确压住标题行，body 接在它下面，
         // 看上去就是那一行自己变了，而不是上面盖了一层。
         const header = root.querySelector('[class*="_sectionHeader"]');
         let headTop = r.top;
         let headHeight = 36;
-        // 输入框的横向范围，直接按宿主几何推导，不再依赖负外边距的叠加：
-        //   .sectionHeader 有 padding-left:4px
-        //   .searchExpanded 是 width:calc(100% + 4px) + margin-inline:-2px
-        //   两者抵消后，输入框左边缘 = header.left + 2，宽度 = header.width - 4
-        //   （右边那 2px 在宿主里被 header 的 overflow:hidden 裁掉，
-        //    我们不做裁剪，所以直接收回来，左右才是对称的 2px）
+        // 横向分两层看：
+        //   barXxx  = 输入框的视觉范围（和原生 .searchExpanded 逐像素对齐）
+        //   bodyXxx = 结果区/背景的范围（通栏，和原生 .listArea 等宽）
+        // 原生 .searchExpanded 是 width:calc(100% + 4px) + margin-inline:-2px，
+        // 向右溢出的 2px 被 .sectionHeader 的 overflow:hidden 裁掉，
+        // 所以输入框视觉上 = left: hr.left + 2、width: hr.width - 2。
         let barLeft = r.left;
         let barWidth = r.width;
         if (header) {
@@ -148,24 +160,61 @@ window.__ModuleLoader__.load({
           if (hr.height >= 16 && hr.width >= 80) {
             headTop = hr.top;
             headHeight = hr.height;
+            // 原生 .searchExpanded 是 width:calc(100% + 4px) + margin-inline:-2px，
+            // 向右溢出的 2px 被 .sectionHeader 的 overflow:hidden 裁掉。
+            // 所以视觉上：左边缘 = hr.left + 2，宽度 = hr.width - 2。
+            // 之前写成 hr.width - 4，右侧就一直差 2px，和放大镜对不齐。
             barLeft = hr.left + 2;
-            barWidth = Math.max(80, hr.width - 4);
+            barWidth = Math.max(80, hr.width - 2);
           }
         }
+        // 底部界限：footArea（「今日消耗金额」那一栏）在 regionArea 之后，
+        // 但它可能因为内容溢出或绝对定位压进工作区范围。
+        // 结果区必须止步在它上边缘，否则列表会从它下面穿过去。
+        let bottomLimit = r.top + r.height;
+        try {
+          const foot = root.querySelector('[class*="_footArea"]');
+          if (foot) {
+            const fr = foot.getBoundingClientRect();
+            if (fr.height > 0 && fr.top > r.top && fr.top < bottomLimit) {
+              bottomLimit = fr.top;
+            }
+          }
+        } catch { /* 忽略 */ }
+
+        // 取侧边栏根节点实际渲染出的底色。--dsw-specific-sidebar-fill
+        // 是定义在侧边栏根节点上的自定义属性，而我们的浮层挂在 shell.overlay
+        // （侧边栏的兄弟节点），拿不到继承值，只能用计算后的颜色。
+        let sidebarFill = '';
+        try {
+          const computed = window.getComputedStyle(root).backgroundColor;
+          if (computed && computed !== 'transparent' && computed !== 'rgba(0, 0, 0, 0)') {
+            sidebarFill = computed;
+          }
+        } catch { /* 忽略 */ }
         return {
           top: r.top,
           left: r.left,
           width: r.width,
           height: r.height,
+          sidebarFill,
           headTop,
           headHeight,
           barLeft,
           barWidth,
+          // 背景与结果区用整块工作区宽度，和原生列表通栏一致
+          bodyLeft: r.left,
+          bodyWidth: r.width,
+          // 输入框相对整块的内缩量：容器通栏后，靠这两个值把输入框摆回原位
+          headPadLeft: Math.max(0, barLeft - r.left),
+          headPadRight: Math.max(0, (r.left + r.width) - (barLeft + barWidth)),
           bodyTop: headTop + headHeight,
-          bodyHeight: Math.max(0, r.top + r.height - (headTop + headHeight)),
+          bodyHeight: Math.max(0, bottomLimit - (headTop + headHeight)),
+          // 结果区能用的最大高度：矮窗口下也不能把输入行挤掉
+          maxBody: Math.max(0, bottomLimit - (headTop + headHeight)),
         };
-      } catch {
-        return null;
+      } catch (error) {
+        return why('threw', { message: error && error.message ? error.message : String(error) });
       }
     }
     // #endregion
@@ -269,7 +318,6 @@ window.__ModuleLoader__.load({
           // 浮层打开时让位给搜索框
           if (isOpen) return undefined;
           let stopped = false;
-          let timer = 0;
           let raf = 0;
           let last = '';
           const settles = [];
@@ -300,15 +348,6 @@ window.__ModuleLoader__.load({
           };
 
           apply();
-
-          // 兜底轮询：降到 500ms。真正「立刻反应」靠下面两条事件通路，
-          // 轮询只负责兜住极端情况（比如宿主用 JS 直接改样式而不改 class）。
-          const poll = () => {
-            if (stopped) return;
-            apply();
-            timer = window.setTimeout(poll, 500);
-          };
-          timer = window.setTimeout(poll, 500);
 
           // 通路一：点标题行（放大镜 / 视图选项 / 导入）时立刻重量。
           // 原生一展开就把搜索槽撑满，我的图标要让位，这里不能等轮询。
@@ -341,7 +380,6 @@ window.__ModuleLoader__.load({
           window.addEventListener('resize', settle);
           return () => {
             stopped = true;
-            window.clearTimeout(timer);
             if (raf) window.cancelAnimationFrame(raf);
             settles.forEach((id) => window.clearTimeout(id));
             if (observer) observer.disconnect();
@@ -522,12 +560,21 @@ window.__ModuleLoader__.load({
           ? {
             position: 'fixed',
             top: box.headTop,
-            // 横向用 sectionHeader 内容盒的范围，和原生输入框左右边对齐
-            left: box.barLeft,
-            width: box.barWidth,
-            // 空查询：只占标题行那一行的高度，不碰下面的列表
+            // 容器通栏（和工作区同宽）：背景、页签、结果区都吃满，
+            // 输入框的内缩交给 .wf-head 的 padding，这样两者各自到位。
+            left: box.bodyLeft,
+            width: box.bodyWidth,
+            // 背景取侧边栏实测底色，视觉上才算「同一块」。
+            // 同时存成变量：吸顶的分组标题要用同一个颜色，
+            // 否则文字会从它下面透上来。
+            background: box.sidebarFill || undefined,
+            '--wf-surface': box.sidebarFill || 'transparent',
+            // 空查询：只占标题行那一行的高度，不碰下面的列表。
+            // 有查询：铺到 footArea 上边缘为止（bodyHeight 已经扣掉了 footArea），
+            // 内容比可用高度短时按内容收缩，不硬撑出空白。
             height: hasQuery
-              ? Math.max(120, box.bodyHeight + box.headHeight)
+              ? Math.max(120, Math.min(box.bodyHeight + box.headHeight,
+                box.maxBody + box.headHeight))
               : box.headHeight,
           }
           : {
@@ -626,6 +673,9 @@ window.__ModuleLoader__.load({
                     'span',
                     { className: 'wf-row-name' },
                     h('span', { className: 'wf-role' }, item.role === 'user/message' ? '你' : 'AI'),
+                    // 命中前若有被裁掉的内容，补一个前置省略号，
+                    // 否则看起来像是消息开头就是这几个字
+                    item.lead ? h('span', { className: 'wf-lead' }, '…') : null,
                     h(Highlighted, { text: item.snippet, query }),
                   ),
                   h(
@@ -660,6 +710,7 @@ window.__ModuleLoader__.load({
                       'span',
                       { key: k, className: 'wf-line' },
                       h('span', { className: 'wf-lineno' }, String(m.lineNumber)),
+                      m.lead ? h('span', { className: 'wf-lead' }, '…') : null,
                       h(Highlighted, { text: m.line, query }),
                     )),
                   )
@@ -674,7 +725,12 @@ window.__ModuleLoader__.load({
           { className: overlayClass, style, role: 'dialog', 'aria-label': tSafe('finder.title') },
           h(
             'div',
-            { className: 'wf-head' },
+            {
+              className: 'wf-head',
+              style: box
+                ? { paddingLeft: box.headPadLeft, paddingRight: box.headPadRight }
+                : undefined,
+            },
             /* 完全照宿主 .searchExpanded 的内部结构：
                [[图标] [输入框] [清除×]] 全都在同一个 30px 高的圆角边框里，
                而不是图标在外、输入框在内两个独立元件。 */
@@ -1147,8 +1203,18 @@ window.__ModuleLoader__.load({
         const matches = [];
         const lines = text.split('\n');
         for (let n = 0; n < lines.length && matches.length < 5; n += 1) {
-          if (lines[n].toLowerCase().includes(lowerQ)) {
-            matches.push({ lineNumber: n + 1, line: lines[n].slice(0, 400) });
+          const lowerLine = lines[n].toLowerCase();
+          const col = lowerLine.indexOf(lowerQ);
+          if (col >= 0) {
+            // 和消息检索同一个问题：整行从 0 截 400 字，
+            // 命中落在 400 字之后就完全看不到高亮。
+            // 改成以命中点为中心取一段窗口。
+            const START = Math.max(0, col - 24);
+            matches.push({
+              lineNumber: n + 1,
+              line: lines[n].slice(START, START + 400),
+              lead: START > 0,
+            });
           }
         }
         if (matches.length) {
@@ -1223,11 +1289,26 @@ window.__ModuleLoader__.load({
       const hits = [];
       for (const msg of messages) {
         if (hits.length >= maxHits) break;
-        const at = msg.text.toLowerCase().indexOf(lowerQuery);
+        const lowerText = msg.text.toLowerCase();
+        const at = lowerText.indexOf(lowerQuery);
         if (at < 0) continue;
-        const start = Math.max(0, at - 60);
+        // 之前从命中点往前留 60 字，但结果行是单行 nowrap + 省略号，
+        // 侧边栏一行只放得下三十几个字 —— 高亮词永远落在可视区外，
+        // 用户看到的就是「整片没有一处亮」。
+        // 改成只往前留 8 个字，让命中词稳定出现在第 9 个字附近。
+        const PAD = 8;
+        const start = Math.max(0, at - PAD);
         const snippet = msg.text.slice(start, start + 240).replace(/\s+/g, ' ').trim();
-        hits.push({ seq: msg.seq, turn: msg.turn, time: msg.time, role: msg.type, snippet, text: msg.text });
+        hits.push({
+          seq: msg.seq,
+          turn: msg.turn,
+          time: msg.time,
+          role: msg.type,
+          snippet,
+          // 补一个「命中前还有多少字」的标记，渲染时据此加前置省略号
+          lead: start > 0,
+          text: msg.text,
+        });
       }
       return hits;
     }
@@ -1485,7 +1566,9 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   background: var(--dsw-alias-bg-base);
   border: 1px solid var(--dsw-alias-border-l3);
   border-radius: var(--dsw-radius-md);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  /* 阴影只在「量不到位置」的卡片兜底形态下出现。原本 22% / 28px 在深色主题里
+     会压出一圈发黑的灰边，比背景还暗；收到 14% / 16px，只留一层能感到的浮动。 */
+  box-shadow: 0 4px 16px rgb(0 0 0 / 14%);
   overflow: hidden;
 }
 /* 就地展开形态：输入行压住原标题行、结果区占住原列表位置。
@@ -1496,19 +1579,51 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   border-radius: 0;
   box-shadow: none;
   /* 必须不透明：底下的宿主标题行即使因为结构变动没藏住，
-     也不会和我们的输入行叠字。 */
-  background: var(--dsw-alias-bg-base);
+     也不会和我们的输入行叠字。
+     颜色必须取侧边栏自己的填充色（--dsw-specific-sidebar-fill），
+     不能用 bg-base —— 那是主区域的底色，和侧边栏本来就不同，
+     铺上去会明显看出「这里贴了一块别的颜色」。 */
+  background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base));
 }
 /* 输入行始终是 36px 高（宿主 sectionHeader 的高度），
    里面那个 28×28 图标按钮 + 30px 高的边框输入框，和原生放大镜展开后逐像素一致。
    is-inline 下不再单独改高度，否则会和基础样式打架。 */
 .wf-overlay.is-inline .wf-head {
+  /* 关键：基础样式里 .wf-head 是 height:100%（当年浮层是一张卡片，
+     头部占满卡片高度是对的）。但就地展开后，浮层高度 = 标题行 + 列表区，
+     再取 100% 会让输入行被 align-items:center 顶到整块正中间，
+     页签和结果区则被挤出容器、被 overflow:hidden 裁掉。
+     展开态下头部必须严格等于标题行高度。 */
+  height: 36px;
+  min-height: 36px;
+  flex: none;
   margin-inline: 0;
   border-bottom: none;
 }
 .wf-overlay.is-inline .wf-tabs {
   border-bottom: 1px solid var(--dsw-alias-border-l3);
-  padding: 0 4px 6px;
+  /* 和结果区一起通栏，只留上下间距 */
+  padding: 0;
+  gap: 2px;
+}
+/* 就地展开形态下，页签用下划线而不是色块：
+   色块 + 大内边距在这么窄的地方太压，视觉上盖过输入框。
+   下划线是这类面板里最轻的分段方式，也和宿主的行内切换语感一致。 */
+.wf-overlay.is-inline .wf-tab {
+  padding: 6px 8px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wf-overlay.is-inline .wf-tab:hover {
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.wf-overlay.is-inline .wf-tab.is-active {
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--dsw-alias-label-primary);
 }
 /* ---- 就地展开：分两级让位，和原生放大镜一致 ---- */
 /* 原生「展开」只把标题行换成输入框，会话列表照常显示；
@@ -1533,9 +1648,25 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 2px;
-  /* 结果区下面已经没有东西可透，自己给背景 */
-  background: var(--dsw-alias-bg-base);
+  /* 横向不留内边距：结果区要和上面标题行一样通栏，
+     缩进由每一行自己的 padding 负责，否则背景看着像缩了一圈。
+     底部留 10px：最后一行不至于被容器边缘齐茬切断，
+     紧挨着下面的「今日消耗金额」看着像被压住。 */
+  padding: 4px 0 10px;
+  /* 背景交给最外层的 .wf-overlay：这里再刷一层同样颜色，
+     滚动条和圆角处会出现一道可见的接缝，看着像两个小方块叠着。 */
+  background: transparent;
+  overscroll-behavior: contain;
+}
+/* 滚动条用宿主侧边栏同款配色，默认那条浅灰在深色背景上很扎眼 */
+.wf-overlay.is-inline .wf-body::-webkit-scrollbar { width: 8px; }
+.wf-overlay.is-inline .wf-body::-webkit-scrollbar-track { background: transparent; }
+.wf-overlay.is-inline .wf-body::-webkit-scrollbar-thumb {
+  background: var(--dsw-alias-scrollbar-bg-l2);
+  border-radius: 4px;
+}
+.wf-overlay.is-inline .wf-body::-webkit-scrollbar-thumb:hover {
+  background: var(--dsw-alias-scrollbar-hover-l2);
 }
 /* 输入行：数值全部照抄宿主 .sectionHeader / .searchExpanded / .searchButton，
    这样展开后的观感和原生放大镜完全一致，看不出是两个来源。 */
@@ -1640,7 +1771,17 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   line-height: 16px;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
+  padding: 2px 8px 0;
+}
+.wf-overlay.is-inline .wf-group {
+  /* 分组标题吸顶：滚动时「当前会话 / 其他会话」始终可辨，
+     否则一滚就不知道自己在看哪一组 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 8px 4px;
+  background: var(--wf-surface, transparent);
 }
 .wf-row {
   display: flex;
@@ -1691,9 +1832,17 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   min-width: 22px;
   text-align: right;
 }
+.wf-lead {
+  flex: none;
+  color: var(--dsw-alias-label-dimmed);
+  margin-right: 1px;
+}
 .wf-mark {
+  /* 原来只用 state-warn-secondary 铺底，在深色主题下几乎和正文同亮度，
+     看不出高亮。这里同时改字色并加粗，任何主题下都能一眼分辨。 */
   background: var(--dsw-alias-state-warn-secondary);
-  color: inherit;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
   border-radius: 2px;
   padding: 0 1px;
 }
@@ -1826,6 +1975,52 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   outline: none;
 }
 .wf-menu-item[data-current="true"] { color: var(--dsw-alias-state-business-primary); }
+/* 被收纳面板的容器：限高 + 内部滚动。
+   宿主菜单自身有 max-height，行数一多就把最后一行截断；
+   给这一段单独限高后，菜单总高是稳定的，超出只在这里滚。 */
+/* 「更多」菜单要和它自己那一行按钮的背景严丝合缝对齐。
+   宿主定位是 x = anchorRect.right - 菜单宽度，所以只要菜单宽度 === 锚点按钮宽度，
+   左边缘就会自动落在按钮左边缘上。
+   --wf-more-w 由 JS 实测「更多」按钮的 rect 写入（见 measureMoreAnchor）。
+   三个宽度属性都要写：宿主的 place() 会往菜单元素上写内联 min-width
+   （= Math.min(锚点宽, ...)），只改 width 会被它顶住，实测就差那 11px。 */
+[class*="_moreMenu"] {
+  width: var(--wf-more-w, 288px) !important;
+  min-width: var(--wf-more-w, 288px) !important;
+  max-width: var(--wf-more-w, 288px) !important;
+}
+/* 菜单变窄后长标签要能省略，不能撑破卡片 */
+.wf-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-menu-list {
+  /* flex 容器里想让它能收缩，必须显式 min-height:0，
+     否则 min-height:auto 会撑到内容高度、max-height 失效。 */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(220px, 36vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 负外边距 + 等量内边距：滚动条贴到菜单边缘，
+     行本身仍然保持原来的 8px 内缩，视觉上和上面的原生项对齐。 */
+  margin: 0 -4px;
+  padding: 0 4px;
+  /* 负外边距让它比内容区宽 8px，若不裁剪会冒出横向滚动条 */
+  overflow-x: hidden;
+}
+.wf-menu-list::-webkit-scrollbar { width: 6px; }
+.wf-menu-list::-webkit-scrollbar-track { background: transparent; }
+.wf-menu-list::-webkit-scrollbar-thumb {
+  background: var(--dsw-alias-scrollbar-bg-l2);
+  border-radius: 3px;
+}
+.wf-menu-list::-webkit-scrollbar-thumb:hover {
+  background: var(--dsw-alias-scrollbar-hover-l2);
+}
 .wf-menu-sep {
   height: 0.5px;
   margin: 3px 2px;
@@ -1863,6 +2058,70 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
       }
       return () => {
         applied.forEach((name) => root.style.removeProperty(name));
+      };
+    }
+    /**
+     * 把「更多」锚点按钮的实测宽度写进 --wf-more-w。
+     * 菜单是 portal 到 body 的，既拿不到侧边栏的继承值，也不在侧边栏子树里，
+     * 所以宽度只能由 JS 量出来写变量。
+     *
+     * 为什么必须量按钮而不是算「侧边栏宽 - 28」：
+     * 宿主的定位是 x = anchorRect.right - 菜单宽度，
+     * 只有菜单宽度严格等于锚点宽度，左边缘才和按钮对齐。
+     * 而锚点宽度还受滚动条、内边距、外边距共同影响，算不如量。
+     */
+    function measureMoreAnchor() {
+      const root0 = typeof document !== 'undefined' ? document.documentElement : null;
+      if (!root0 || !root0.style) return undefined;
+      let observer = null;
+      let timer = 0;
+      let watched = null;
+      const write = () => {
+        try {
+          const sidebar = document.querySelector(SEL_SIDEBAR);
+          if (!sidebar) return false;
+          // [aria-haspopup="menu"] 只有「更多」这一个按钮会有
+          const anchor = sidebar.querySelector('[aria-haspopup="menu"]');
+          if (!anchor) return false;
+          const r = anchor.getBoundingClientRect();
+          if (!(r.width > 0)) return false;
+          root0.style.setProperty('--wf-more-w', Math.round(r.width) + 'px');
+          if (typeof ResizeObserver === 'function' && watched !== anchor) {
+            try {
+              if (watched && observer) observer.unobserve(watched);
+              observer.observe(anchor);
+              watched = anchor;
+            } catch { /* 忽略 */ }
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      if (typeof ResizeObserver === 'function') {
+        try { observer = new ResizeObserver(() => write()); } catch { observer = null; }
+      }
+      const ok = write();
+      // 侧边栏可能比插件晚挂载；按钮在开合菜单时也会重建，所以要持续兜几拍
+      const hasInterval = typeof window.setInterval === 'function';
+      let tries = 0;
+      if (hasInterval) {
+        timer = window.setInterval(() => {
+          tries += 1;
+          write();
+          if ((ok && tries > 6) || tries > 120) {
+            window.clearInterval(timer);
+            timer = 0;
+          }
+        }, 250);
+      }
+      const hasEvent = typeof window.addEventListener === 'function';
+      if (hasEvent) window.addEventListener('resize', write);
+      return () => {
+        try { if (timer) window.clearInterval(timer); } catch { /* 忽略 */ }
+        if (observer) { try { observer.disconnect(); } catch { /* 忽略 */ } }
+        try { if (hasEvent) window.removeEventListener('resize', write); } catch { /* 忽略 */ }
+        try { root0.style.removeProperty('--wf-more-w'); } catch { /* 忽略 */ }
       };
     }
     // #endregion
@@ -1979,24 +2238,32 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
 
         const hidden = entries.filter((entry) => entry && hiddenIds.has(entry.id));
         if (!hidden.length) return null;
+        // 这些行是补进「更多」菜单的，行数一多就会把菜单撑到超过宿主的高度上限，
+        // 导致最后一行被拦腰截断（看着像菜单漏了半个）。
+        // 所以给它们单独一个带高度上限的滚动容器：菜单总高保持住，
+        // 多出来的部分只在这一段里滚，宿主菜单本身不再被截断。
         return h(
           React.Fragment,
           null,
           h('div', { className: 'wf-menu-sep', role: 'separator' }),
-          hidden.map((entry) => h(
-            'button',
-            {
-              key: entry.id,
-              type: 'button',
-              className: 'wf-menu-item',
-              'data-current': entry.active ? 'true' : undefined,
-              onClick: () => {
-                if (typeof onDismiss === 'function') onDismiss();
-                if (typeof onOpen === 'function') onOpen(entry.id);
+          h(
+            'div',
+            { className: 'wf-menu-list' },
+            hidden.map((entry) => h(
+              'button',
+              {
+                key: entry.id,
+                type: 'button',
+                className: 'wf-menu-item',
+                'data-current': entry.active ? 'true' : undefined,
+                onClick: () => {
+                  if (typeof onDismiss === 'function') onDismiss();
+                  if (typeof onOpen === 'function') onOpen(entry.id);
+                },
               },
-            },
-            entry.label || entry.id,
-          )),
+              h('span', { className: 'wf-menu-label' }, entry.label || entry.id),
+            )),
+          ),
         );
       };
     }
@@ -2053,6 +2320,8 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
         ctx.effect(() => applyCss(), 'sidebar-finder: styles');
         // 尺寸配置 → CSS 变量
         ctx.effect(() => applyVars(config), 'sidebar-finder: vars');
+        // 「更多」锚点宽度 → CSS 变量（让菜单与那一行按钮对齐）
+        ctx.effect(() => measureMoreAnchor(), 'sidebar-finder: more-anchor');
 
         // ---- 收纳：隐藏非白名单面板行 + 把它们补进「更多」 ----
         const visible = normalizeVisible(config);

@@ -17,6 +17,9 @@
     "locale/*.json",
     "icon.svg"
   ],
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
