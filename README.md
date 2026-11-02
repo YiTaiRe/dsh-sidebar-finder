@@ -3,36 +3,29 @@
 DSH 侧边栏改造插件：面板收纳 + 工作区标题行内联查找（文件 / 会话消息）。
 
 
-## 当前状态：已从 profile 注销
+## 安装
 
-2026-11-02：因为 pnpm 无法在本环境运行（全局 store 锁被占用），插件**已从 profile 完全注销**，
-以免影响其它插件的更新。注销内容：
+仓库为公开仓库，可直接用 GitHub 地址安装：
 
-- profile `package.json`：移除 `dependencies` 与 `dsh.profile.bundles` 里的登记
-- profile `cordis.patch.yml`：移除 `insert: sidebar-finder` 整段（47 行）
-- 删除 `node_modules/@local/` 与 `vendor/`
-
-源码与三份防护**全部保留**，随时可重新安装。
-
-### 重新安装的正确姿势
-
-**不要**再用 `link:` 或 junction —— 那是上次源码被删的原因。
-
-等 pnpm 可用后（关闭所有 DSH 进程再跑）：
-
-```bash
-# 1) 源码放进 profile 内的 vendor/（pnpm 不管理这里）
-cp -r packages/dsh-sidebar-finder "$DSH_PROFILE_DIR/vendor/"
-# 2) 声明为 file: 依赖，让 pnpm 写进 lockfile（关键）
-#    在 profile/package.json 的 dependencies 加：
-#    "@local/dsh-sidebar-finder": "file:vendor/dsh-sidebar-finder"
-# 3) 把包名加回 dsh.profile.bundles
-# 4) 跑 pnpm install，让 pnpm 自己建立 node_modules 链接
+```
+https://github.com/YiTaiRe/dsh-sidebar-finder
 ```
 
-第 4 步是关键：让 **pnpm 自己**建链接，它就认得这个包，不会再当垃圾清理。
+在 DSH 的插件管理里添加上述地址即可。
 
-安装形态（重要，改动前务必读完）
+> 2026-11-02 补记：本环境的 pnpm 有全局 store 锁（`ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`，
+> 换 store 目录也无效），因此**从命令行跑 pnpm 会失败**。装在 DSH 界面里由 DSH 进程发起则不受影响。
+
+### 曾经踩过的坑
+
+**不要**用 `link:` 或 junction 把工作区源码链进 profile 的 `node_modules`。
+pnpm 会按 lockfile 重算目录，不在记录里的包被判为多余项删除；如果那条是 junction
+（重解析点），递归删除会穿透到目标，把源码一起清空 —— 本插件就因此丢过一次全部源码。
+
+正确做法是让 pnpm 自己建立链接：源码放 profile 内的 `vendor/`，
+`dependencies` 写 `file:vendor/dsh-sidebar-finder`，再跑 `pnpm install`。
+
+## 安装形态（重要，改动前务必读完）
 
 这个插件**不是**用 `link:` 或 junction 装的。原因是一次真实事故：
 
