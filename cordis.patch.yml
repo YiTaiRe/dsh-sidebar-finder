@@ -1,0 +1,45 @@
+- insert:
+    - id: sidebar-finder
+      name: '@local/dsh-sidebar-finder'
+      config:
+        # 顶部区常驻可见的面板 id。plugins 由宿主强制常驻，这里列出只为声明意图。
+        # 记忆系统 = mnemon（dsh-mnemon 的面板）
+        alwaysVisible:
+          - plugins
+          - mnemon
+        # true：不在 alwaysVisible 里的面板全部收进「更多」
+        collapseOthers: true
+        # 工作区最小高度（px），防止被上方面板列表挤扁
+        workspaceMinHeight: 240
+        # 面板列表最大高度（vh），超过则自己滚动，不再挤压工作区
+        panelListMaxHeightVh: 40
+        # 「查找」行的位置：after-more = 排在「更多」之后（工作区块首行）
+        finderPosition: after-more
+        # 搜索时排除的目录名（任意层级）
+        excludeDirs:
+          - .git
+          - node_modules
+          - dist
+          - build
+          - .venv
+          - __pycache__
+          - .next
+          - target
+        # 单次搜索最大结果数
+        maxResults: 200
+        # 目录递归深度上限
+        maxDepth: 12
+        # 内容匹配的文件数预算（超出只做文件名匹配）
+        textFileBudget: 120
+        # 单文件最多读取行数（超过只匹配前 N 行）
+        maxContentLines: 4000
+        # 消息检索：最多返回多少条消息命中
+        maxMessageResults: 40
+        # 消息检索：除当前会话外，最多钻进多少个其他会话
+        maxMessageSessions: 6
+        # 消息检索：每个会话最多向前翻多少页历史
+        messagePageBudget: 8
+        # 输入防抖（ms）
+        debounceMs: 300
+        # 快捷键：null 表示不注册。例如 "Ctrl+Shift+F"
+        shortcut: null
