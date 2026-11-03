@@ -3,7 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "DSH 侧边栏改造 + 工作区内容查找：顶部面板收纳、工作区保底高度、就地搜索浮层、目录树、发图区下拉板块",
+  "description": "把侧边栏空间还给工作区，并把文件与消息查找放进工作区标题行：面板收纳、工作区保底高度、就地内联搜索（文件名/全文/会话消息）",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "sidebar",
+    "search",
+    "workspace",
+    "finder"
+  ],
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

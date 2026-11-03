@@ -1,142 +1,141 @@
 # dsh-sidebar-finder
 
-DSH 侧边栏改造插件：面板收纳 + 工作区标题行内联查找（文件 / 会话消息）。
+**给 DSH 侧边栏做两件事：把空间还给工作区，把查找放进工作区。**
 
+---
+
+## 它解决什么问题
+
+### 1. 侧边栏被面板列表挤占
+
+DSH 侧边栏顶部是一列功能面板（插件、插件市场、归档会话、自动化任务、上下文洞察、技能中心、记忆系统……）。面板一多，列表就把下方的工作区压缩得很小——只有五六条会话可见，想找历史会话就得反复滚动。
+
+这个插件把侧边栏整理成清晰的上下两层：
+
+```
+┌─────────────────────────────┐
+│  插件                        │  ← 保留常用入口
+│  记忆系统                     │
+│  更多                        │  ← 其余全部收纳进来
+├─────────────────────────────┤
+│  工作区            🔍 ⚙ 📁+  │  ← 查找入口就在这一行
+│   📁 项目 A                  │
+│   📁 项目 B                  │  ← 保底 240px，不再是窄条
+│   📁 项目 C                  │
+│   …                          │
+└─────────────────────────────┘
+```
+
+**效果**：面板区从约 266px 降到约 114px，工作区净增约 180px，可见条数从五六条变成十条以上。
+
+哪些面板保留、哪些收纳，写进配置，随时可改。
+
+### 2. 找不到东西——文件和消息都找不到
+
+DSH 自带会话标题搜索，但**搜不了文件内容，也搜不了对话正文**。工作区里的代码、文档，几天前聊过的某句话，全靠手工翻。
+
+这个插件把查找入口放进工作区标题行，与其他图标并排，视觉与交互完全照抄宿主的会话搜索：
+
+- **点一下**：标题行在原位变成输入框，会话列表照常显示
+- **打字时**：结果就地替换列表，不打字不打扰
+- **点 ×**：恢复原状
+
+两个页签：
+
+| 页签 | 搜什么 | 结果 |
+|---|---|---|
+| **文件** | 工作区文件名 + 全文内容 | 命中行带上下文，关键词高亮，点击直接打开文件 |
+| **消息** | 当前会话 + 其他会话的对话正文 | 按「当前会话 / 其他会话」分组，带轮次号，点击跳到那一轮并高亮 |
+
+消息检索会顺着会话历史向前翻页，不限于当前加载的那几百条；其他会话先用会话级搜索缩小候选，再逐条钻进去搜正文。
+
+---
 
 ## 安装
 
-仓库为公开仓库，可直接用 GitHub 地址安装：
+仓库为公开仓库，在 DSH 的插件管理里添加地址即可：
 
 ```
 https://github.com/YiTaiRe/dsh-sidebar-finder
 ```
 
-在 DSH 的插件管理里添加上述地址即可。
-
-> 2026-11-02 补记：本环境的 pnpm 有全局 store 锁（`ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`，
-> 换 store 目录也无效），因此**从命令行跑 pnpm 会失败**。装在 DSH 界面里由 DSH 进程发起则不受影响。
-
-### 曾经踩过的坑
-
-**不要**用 `link:` 或 junction 把工作区源码链进 profile 的 `node_modules`。
-pnpm 会按 lockfile 重算目录，不在记录里的包被判为多余项删除；如果那条是 junction
-（重解析点），递归删除会穿透到目标，把源码一起清空 —— 本插件就因此丢过一次全部源码。
-
-正确做法是让 pnpm 自己建立链接：源码放 profile 内的 `vendor/`，
-`dependencies` 写 `file:vendor/dsh-sidebar-finder`，再跑 `pnpm install`。
-
-## 安装形态（重要，改动前务必读完）
-
-这个插件**不是**用 `link:` 或 junction 装的。原因是一次真实事故：
-
-> profile 的 `node_modules` 归 pnpm 管理。某次插件升级触发 pnpm 按 `pnpm-lock.yaml`
-> 重算目录，本插件不在 lockfile 里 → 被判为多余项 → 递归删除
-> `node_modules/@local/dsh-sidebar-finder`。那条是 **Windows junction（重解析点）**，
-> 删除穿透到目标目录，**把工作区里的插件源码一起清空了**（7 个文件全变 0 字节）。
-> 最后靠会话日志 `session.v4.jsonl.zstd` 多帧解压 + 重放 write/edit 才恢复。
-
-所以现在的形态是：
-
-| 项目 | 位置 | 说明 |
-|---|---|---|
-| 源码（唯一真源） | `packages/dsh-sidebar-finder/` | git 仓库，8 文件 |
-| 安装副本 | `~/.dsh/profiles/desktop/node_modules/@local/dsh-sidebar-finder/` | **真实副本**，非链接 |
-| 登记 | profile `package.json` 的 `dsh.profile.bundles` | 保留 |
-| 依赖声明 | profile `package.json` 的 `dependencies` | **已删除**（不再有 `link:`） |
-
-`dependencies` 里不声明它，pnpm 就不知道有这个包，也就不会去动它；但宿主仍能解析，
-因为 `resolveBundleDir` 用的是 `createRequire(profile/package.json).resolve.paths()`
-逐级查找 `node_modules` 目录，只要目录真实存在就能找到（已验证返回
-`<profile>/node_modules/@local/dsh-sidebar-finder`）。
-
-**风险提示**：pnpm 在 `nodeLinker: hoisted` 模式下，理论上仍可能把 `node_modules` 里
-「不在 lockfile 中」的目录当垃圾清掉。现在它是真实目录（不是链接），**被删也只丢副本，
-不会伤到源码** —— 跑一次下面的同步脚本即可恢复。
-
-## 改完代码怎么让它生效
-
-```bash
-cd <项目根>
-node scripts/sync-plugin.mjs
-```
-
-脚本会：清空安装副本 → 从源码复制 8 个条目 → 对 `client.js`/`index.js`/`package.json`
-做 md5 校验。然后**重启 DSH** 生效。
-
-`--dry` 可只看会复制什么，不写入。
-
-## 三级防护
-
-1. **git**（`packages/dsh-sidebar-finder/.git`）：`.gitattributes` 固定 LF，
-   避免 Windows checkout 改换行造成虚假 diff。
-2. **源码 tar 快照**：`_tmp/backups/dsh-sidebar-finder-src-<ts>.tar.gz`（约 28 KB，纯 8 文件）。
-   另有含 `.git` 的完整包 `dsh-sidebar-finder-<ts>.tar.gz`（约 75 KB）。
-3. **安装副本与源码物理分离**：源码在工作区，副本在 profile，pnpm 只能碰副本。
-
-## 从会话日志恢复（最后手段）
-
-如果源码和快照都丢了，DSH 会话日志里存着完整的 `write`/`edit` 操作历史：
-
-```bash
-# 日志位置
-~/.dsh/sessions/--<工作区路径转义>--/session-<id>/session.v4.jsonl.zstd
-```
-
-要点：**是多帧 zstd**。`zlib.zstdDecompressSync()` 单帧只解出开头几百字节，
-必须按 magic `28b52ffd` 扫描出全部帧、逐帧解压再 `Buffer.concat`。
-参考脚本 `_tmp/replay.mjs`、`_tmp/replay-all.mjs`。
-
-重放规则：按 `seq` 升序，`write` 设基线，`edit` 用 `content.indexOf(old_string)` 精确替换。
-注意有些 `edit` 在真实历史里本来就是失败的（`old_string was not found`），重放时会同样失败，
-这是正确的，不是重放缺陷。
+---
 
 ## 配置
 
-改 `~/.dsh/profiles/desktop/cordis.patch.yml` 里 `id: sidebar-finder` 段的 `config`：
+改 profile 的 `cordis.patch.yml` 里 `id: sidebar-finder` 段的 `config`，重启生效。
+
+### 面板收纳
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `alwaysVisible` | `[plugins, mnemon]` | 顶部常驻面板 |
-| `collapseOthers` | `true` | 其余面板收进「更多」 |
-| `workspaceMinHeight` | `240` | 工作区保底高度 px |
-| `panelListMaxHeightVh` | `40` | 面板区最大高度 vh |
-| `excludeDirs` | `.git node_modules dist build .venv __pycache__ .next target` | 搜索跳过目录 |
-| `maxResults` | `200` | 文件搜索结果上限 |
-| `maxDepth` | `12` | 目录递归深度 |
-| `textFileBudget` | `120` | 全文搜索读多少个文件 |
-| `maxContentLines` | `4000` | 单文件最多读多少行 |
-| `maxMessageResults` | `40` | 消息命中上限 |
-| `maxMessageSessions` | `6` | 除当前会话外钻几个会话 |
-| `messagePageBudget` | `8` | 每会话向前翻几页 |
-| `debounceMs` | `300` | 输入防抖 |
+| `alwaysVisible` | `[plugins, mnemon]` | 顶部常驻的面板 id 列表 |
+| `collapseOthers` | `true` | 其余面板是否收进「更多」 |
+| `workspaceMinHeight` | `240` | 工作区保底高度（px） |
+| `panelListMaxHeightVh` | `40` | 面板区最大高度（vh） |
 
-改完同样要重启 DSH。
+面板 id 就是你在 `cordis.patch.yml` 里看到的名字，例如 `plugins`、`mnemon`、`dsh-market`、`schedules`、`dsh-context`、`skill-explorer`。
+
+### 文件搜索
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `excludeDirs` | `.git node_modules dist build .venv __pycache__ .next target` | 跳过的目录名 |
+| `maxResults` | `200` | 结果上限 |
+| `maxDepth` | `12` | 递归深度上限 |
+| `textFileBudget` | `120` | 全文搜索最多读多少个文件 |
+| `maxContentLines` | `4000` | 单文件最多读多少行 |
+| `debounceMs` | `300` | 输入防抖（毫秒） |
+
+### 消息搜索
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `maxMessageResults` | `40` | 消息命中上限 |
+| `maxMessageSessions` | `6` | 除当前会话外，最多钻进几个其他会话 |
+| `messagePageBudget` | `8` | 每个会话最多向前翻几页历史 |
+
+---
+
+## 设计取舍
+
+**不自建索引。** 直接用宿主已有的工作区文件接口递归遍历，每次搜索现算。省掉了索引维护的复杂度和陈旧问题，代价是大仓库首次搜索要等一会儿——所以有 `textFileBudget` 和 `maxContentLines` 控制预算。
+
+**不改宿主代码。** 全部通过官方 slot 扩展点和 CSS 实现。视觉上刻意对齐宿主原生搜索：同一套尺寸、同一套配色变量、同一套过渡时长。深浅主题自动跟随。
+
+**查找不抢工作区。** 空查询时只占标题行一行，会话列表照常可见可点；只有真正输入内容才用结果替换列表。这一点和宿主原生搜索行为一致。
+
+---
 
 ## 已知限制
 
-- 面板收纳依赖宿主「更多」菜单打开过一次（宿主只在该菜单渲染时提供 `onPinnedChange`），
-  且 pin 状态是纯内存、重启重置。
-- 消息定位靠 `[data-chat-turn="N"]` DOM 锚点，太旧未渲染的消息只能切会话不能滚动定位。
-- 选择器匹配的是宿主哈希类名（`[class*="_sectionHeader"]` 等），宿主大改版可能失效。
+- **面板收纳需要打开一次「更多」菜单**才生效。宿主只在菜单渲染时才提供 pin 回调，插件初始化拿不到——重启后打开一次菜单即恢复。
+- **消息定位依赖已渲染的 DOM 行**。命中的消息如果太旧、当前视图还没加载到那一轮，会切到对应会话但不滚动定位。
+- **选择器匹配的是宿主的 CSS 类名片段**（`[class*="_sectionHeader"]` 等）。宿主大改版可能失效，届时需要跟着调整。
 
-## 本地开发与推送
+---
 
-改完代码后，在项目根目录执行：
+## 开发
 
 ```bash
-bash scripts/push.sh "你的提交说明"
+# 改完代码，同步到安装位置
+node scripts/sync-plugin.mjs
+
+# 重启 DSH 生效
 ```
 
-脚本会依次完成三件事：先 `git add -A`，再自动提交，最后推送到 GitHub。
+脚本会清空安装副本、从源码复制全部条目、对 `client.js`/`index.js`/`package.json` 做 md5 校验。`--dry` 可只看会复制什么。
 
-**为什么不能直接 `git push`**（三个环境坑，脚本已全部绕过）：
+源码在 `packages/dsh-sidebar-finder/`，安装副本在 `<profile>/node_modules/@local/dsh-sidebar-finder/`，两者物理分离。
 
-1. Git 默认临时目录 `<系统临时目录>\...` 在本环境不可写，
-   会报「对路径 ...system-commandline-sentinel-files 的访问被拒绝」→ 脚本把
-   `TMPDIR`/`TEMP`/`TMP` 全部指到 `_tmp/gittmp`。
-2. 全局 `~/.gitconfig` 只读，装不了 credential helper → 脚本改用 `gh auth token`
-   取令牌，通过 `-c http.extraheader` 临时注入，不写任何全局配置。
-3. MSYS 会把 `/user` 这类参数改写成 Windows 路径 → 脚本设置
-   `MSYS_NO_PATHCONV=1` 和 `MSYS2_ARG_CONV_EXCL='*'`。
+推送：
 
-只推送已有提交（不新建提交）：`bash scripts/push.sh --no-commit`
+```bash
+bash scripts/push.sh "提交说明"
+```
+
+---
+
+## 许可
+
+MIT
