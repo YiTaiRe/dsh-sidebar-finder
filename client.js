@@ -2086,28 +2086,12 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   white-space: nowrap;
 }
 .wf-menu-list {
-  /* flex 容器里想让它能收缩，必须显式 min-height:0，
-     否则 min-height:auto 会撑到内容高度、max-height 失效。 */
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: min(220px, 36vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  /* 负外边距 + 等量内边距：滚动条贴到菜单边缘，
-     行本身仍然保持原来的 8px 内缩，视觉上和上面的原生项对齐。 */
-  margin: 0 -4px;
-  padding: 0 4px;
-  /* 负外边距让它比内容区宽 8px，若不裁剪会冒出横向滚动条 */
-  overflow-x: hidden;
-}
-.wf-menu-list::-webkit-scrollbar { width: 6px; }
-.wf-menu-list::-webkit-scrollbar-track { background: transparent; }
-.wf-menu-list::-webkit-scrollbar-thumb {
-  background: var(--dsw-alias-scrollbar-bg-l2);
-  border-radius: 3px;
-}
-.wf-menu-list::-webkit-scrollbar-thumb:hover {
-  background: var(--dsw-alias-scrollbar-hover-l2);
+  /* 这里刻意不设 max-height / overflow：
+     宿主的 Menu 外层已经有 .scrollable（max-height 按视口算），
+     自己再套一层就会出第二个滚动条，看着像菜单里嵌了个小窗口。
+     交给宿主统一滚，行为跟原生项完全一致。 */
+  display: flex;
+  flex-direction: column;
 }
 .wf-menu-sep {
   height: 0.5px;
