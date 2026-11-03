@@ -1,2 +1,4 @@
 node_modules/
 *.log
+# build.mjs 的中间产物（校验失败时留在这里便于排查）
+.client.build.tmp.js

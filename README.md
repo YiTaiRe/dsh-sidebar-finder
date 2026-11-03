@@ -117,16 +117,48 @@ https://github.com/YiTaiRe/dsh-sidebar-finder
 
 ## 开发
 
+源码拆在 `src/` 下，按功能分 17 个片段；`client.js` 是构建产物，不要直接改。
+
 ```bash
-# 改完代码，同步到安装位置
+# 改完 src/ 里的代码后构建
+npm run build          # 拼装 + 语法检查 + 冒烟测试，全部通过才写 client.js
+
+# 只校验，不写文件（CI / 提交前用）
+npm run check
+
+# 构建完同步到安装位置
 node scripts/sync-plugin.mjs
 
 # 重启 DSH 生效
 ```
 
-脚本会清空安装副本、从源码复制全部条目、对 `client.js`/`index.js`/`package.json` 做 md5 校验。`--dry` 可只看会复制什么。
+**为什么是拼接而不是模块化：** 整个 `client.js` 跑在 ModuleLoader 的 factory 闭包里，所有片段本来就共享同一套闭包变量。改成各文件独立的模块作用域，需要给每个跨文件引用加显式 import/export，等于重写一遍——而且本机没有 esbuild/rollup，改坏了没有编译期兜底。按顺序拼接保持语义完全一致，新增或删除文件只改 `scripts/build.mjs` 里的 `ORDER`。
+
+**安全阀：** 构建先 `node --check`，再跑冒烟测试（验证四个槽注册、六个 effect、CSS 完整性、收纳规则、pin 同步）。任一步失败就**不写 `client.js`**，原文件保持不动。`sync-plugin.mjs` 同步前也会先跑一次 `--check`，防止改了 `src/` 忘了构建。
 
 源码在 `packages/dsh-sidebar-finder/`，安装副本在 `<profile>/node_modules/@local/dsh-sidebar-finder/`，两者物理分离。
+
+### 片段清单
+
+| 文件 | 行数 | 内容 |
+|---|---|---|
+| `src/00-head.js` | 7 | ModuleLoader 外壳、React 取值 |
+| `src/10-constants.js` | 9 | 面板 id、locale 命名空间、选择器 |
+| `src/20-dict.js` | 56 | 中英词典 |
+| `src/30-open-state.js` | 20 | 跨 slot 的打开状态 |
+| `src/40-icon.js` | 26 | 图标（viewBox 与放大镜对齐） |
+| `src/50-measure.js` | 163 | 工作区矩形测量、底部边界探测 |
+| `src/60-overlay-helpers.js` | 31 | `openFile`、关键词高亮 |
+| `src/65-header-entry.js` | 157 | 标题行入口的位置计算 |
+| `src/70-overlay.js` | 412 | 搜索浮层主体 |
+| `src/75-fs-search.js` | 421 | 工作区文件遍历与内容匹配 |
+| `src/80-msg-search.js` | 277 | 会话消息检索与跳转 |
+| `src/85-t-safe.js` | 10 | 词典读取（未注入 locale 时回退中文） |
+| `src/90-css.js` | 513 | 样式表 |
+| `src/92-runtime-vars.js` | 148 | 运行时 CSS 变量、菜单宽度测量 |
+| `src/94-fallback-panel.js` | 14 | 兜底页 |
+| `src/96-collapse.js` | 130 | 面板收纳（CSS 生成 + 「更多」补行） |
+| `src/99-plugin.js` | 148 | 插件对象（inject / apply） |
 
 推送：
 

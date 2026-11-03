@@ -12,6 +12,10 @@
     "workspace",
     "finder"
   ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs --check"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
