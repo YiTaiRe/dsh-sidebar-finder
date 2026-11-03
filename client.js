@@ -41,18 +41,6 @@ window.__ModuleLoader__.load({
       panels: { more: '更多' },
       collapse: { done: '已按配置收纳 {n} 项', none: '无需收纳' },
       fallback: { title: '工作区查找', body: '在侧边栏点「查找」可打开搜索浮层。' },
-      dock: {
-        toggle: '更多附件与操作',
-        recent: '最近改动',
-        loading: '正在读取工作区…',
-        empty: '工作区里还没有可引用的文件',
-        failed: '读不到工作区文件',
-        noSession: '还没有打开的会话',
-        insert: '插入引用',
-        open: '在查找中浏览…',
-        inserted: '已插入引用',
-        notReady: '输入框还没准备好，稍后再试',
-      },
     };
     const en = {
       finder: {
@@ -80,18 +68,6 @@ window.__ModuleLoader__.load({
       panels: { more: 'More' },
       collapse: { done: 'Collapsed {n} panel(s) per config', none: 'Nothing to collapse' },
       fallback: { title: 'Workspace finder', body: 'Open the search overlay from "Find" in the sidebar.' },
-      dock: {
-        toggle: 'More attachments & actions',
-        recent: 'Recently changed',
-        loading: 'Reading workspace…',
-        empty: 'No files to reference yet',
-        failed: 'Cannot read workspace files',
-        noSession: 'No open session',
-        insert: 'Insert reference',
-        open: 'Browse in Find…',
-        inserted: 'Reference inserted',
-        notReady: 'Composer is not ready, try again',
-      },
     };
     // #endregion
 
@@ -102,14 +78,6 @@ window.__ModuleLoader__.load({
       if (open === next) return;
       open = next;
       listeners.forEach((fn) => fn(open));
-    }
-    /**
-     * 给「在自己组件里也叫 setOpen」的地方用的别名。
-     * 模块级的 setOpen 会被组件内的 useState 解构遮蔽，
-     * 所以发图区那块统一走这个不会撞名的入口。
-     */
-    function openFinderOverlay() {
-      setOpen(true);
     }
     function useOpen() {
       const [, force] = useState(0);
@@ -200,10 +168,23 @@ window.__ModuleLoader__.load({
             barWidth = Math.max(80, hr.width - 2);
           }
         }
-        // 底部界限：footArea（「今日消耗金额」那一栏）在 regionArea 之后，
-        // 但它可能因为内容溢出或绝对定位压进工作区范围。
-        // 结果区必须止步在它上边缘，否则列表会从它下面穿过去。
+        // 底部界限：结果区必须止步在侧边栏底部的浮动卡之上，否则列表会从
+        // 「今日消耗金额」那张卡下面穿过去。
+        //
+        // 踩过两次坑，记下来免得再走一遍：
+        //   第一次只量 [class*="_footArea"] 上边缘 —— 没用。
+        //   第二次以为卡是 footArea 里的 fixed 子元素，在 foot 里找 —— 也没用。
+        // 真相：那张卡是 @kenz1117/dsh-ui-usage-billing 用 createPortal 传送到
+        // 宿主根节点之外的固定浮层，从视口底部往上浮。它既不在 footArea 里，
+        // 也不在侧边栏子树里，所以前面两种找法都看不见它。
+        //
+        // 于是分成两路取最靠上的边界：
+        //   ① footArea 上边缘（没有浮动卡时的自然边界）
+        //   ② 全页里那些 position:fixed 的浮层，只要横向压在侧边栏上、
+        //      纵向落在侧边栏下半段，就认为它会挡住结果区，取它的上边缘
         let bottomLimit = r.top + r.height;
+        const sidebarBox = root.getBoundingClientRect();
+
         try {
           const foot = root.querySelector('[class*="_footArea"]');
           if (foot) {
@@ -212,6 +193,53 @@ window.__ModuleLoader__.load({
               bottomLimit = fr.top;
             }
           }
+        } catch { /* 忽略 */ }
+
+        // 第三路（真正管用的那一路）：从下往上逐点探测「这个位置最上层是谁」。
+        //
+        // 前两路为什么失效：按 position:fixed + 类名扫全页，扫不到那张卡。
+        // 但卡片的 z-index 是 2000，我们的浮层只有 40 —— 它明明画在上层，
+        // 却因为 DOM 挂在传送门里、或者定位方式不同而漏掉了。
+        //
+        // 与其猜它长什么样、挂在哪，不如直接问浏览器：在侧边栏中轴线上，
+        // 从工作区底边往上每个点，elementFromPoint 返回的最上层元素
+        // 还是不是我们自己的浮层？第一次「不再是我们的」那一行，
+        // 就是底部卡片的上边缘 —— 不依赖类名、不依赖定位方式、不依赖 DOM 归属。
+        //
+        // pointer-events:none 的元素会被 elementFromPoint 跳过，
+        // 所以我们的渐隐条不会干扰探测结果。
+        try {
+          const x = Math.round(sidebarBox.left + Math.min(24, sidebarBox.width * 0.5));
+          if (x > sidebarBox.left + 1 && x < sidebarBox.right - 1) {
+            const bottomEdge = Math.floor(r.top + r.height) - 1;
+            let sawOther = 0;
+            let found = -1;
+            for (let y = bottomEdge; y > r.top + 40; y -= 2) {
+              const el = document.elementFromPoint(x, y);
+              if (!el) break;
+              const mine = typeof el.closest === 'function'
+                ? el.closest('[data-wf-surface]')
+                : null;
+              if (mine) {
+                // 撞回自己了：只有当底下连着几行都不是自己时才算「真的被挡住」
+                if (sawOther >= 3) found = y;
+                break;
+              }
+              sawOther += 1;
+            }
+            if (found > 0 && found < bottomLimit) bottomLimit = found;
+          }
+        } catch { /* 忽略 */ }
+
+        // 给卡片本身留一点缝，别贴脸
+        const FOOT_GAP = 6;
+        if (bottomLimit < r.top + r.height) bottomLimit = Math.max(r.top, bottomLimit - FOOT_GAP);
+        try {
+          window.__wfBottom = {
+            bottomLimit: Math.round(bottomLimit),
+            regionBottom: Math.round(r.top + r.height),
+            gap: Math.round(r.top + r.height - bottomLimit),
+          };
         } catch { /* 忽略 */ }
 
         // 取侧边栏根节点实际渲染出的底色。--dsw-specific-sidebar-fill
@@ -472,7 +500,11 @@ window.__ModuleLoader__.load({
           };
         }, [isOpen, query]);
 
-        // 打开时量一次；窗口尺寸变化时重量
+        // 打开时量一次；窗口尺寸变化时重量。
+        //
+        // 为什么要补测几次：底栏那张「今日消耗金额」卡是 fixed 定位、由别的
+        // 插件异步渲染的，打开浮层那一刻它可能还没画出来，量到的底边会偏下。
+        // 补 220ms / 600ms 两次，等它画稳了再量一遍。
         useEffect(() => {
           if (!isOpen) {
             setBox(null);
@@ -481,10 +513,10 @@ window.__ModuleLoader__.load({
           const remeasure = () => setBox(measureRegion());
           remeasure();
           window.addEventListener('resize', remeasure);
-          const timer = window.setTimeout(remeasure, 60);
+          const timers = [60, 220, 600].map((ms) => window.setTimeout(remeasure, ms));
           return () => {
             window.removeEventListener('resize', remeasure);
-            window.clearTimeout(timer);
+            timers.forEach((t) => window.clearTimeout(t));
           };
         }, [isOpen]);
 
@@ -590,11 +622,12 @@ window.__ModuleLoader__.load({
             background: box.sidebarFill || undefined,
             '--wf-surface': box.sidebarFill || 'transparent',
             // 空查询：只占标题行那一行的高度，不碰下面的列表。
-            // 有查询：铺到 footArea 上边缘为止（bodyHeight 已经扣掉了 footArea），
-            // 内容比可用高度短时按内容收缩，不硬撑出空白。
+            // 有查询：铺到「底栏卡片上沿」为止。注意这里不能再用
+            // Math.max(120, …) 兜底 —— 矮窗口下可用高度本来就不到 120，
+            // 兜底反而会把浮层顶出边界、压到底部卡片上。
+            // bodyHeight 已经把底部卡片让出来了，直接用即可。
             height: hasQuery
-              ? Math.max(120, Math.min(box.bodyHeight + box.headHeight,
-                box.maxBody + box.headHeight))
+              ? Math.max(box.headHeight, box.bodyHeight + box.headHeight)
               : box.headHeight,
           }
           : {
@@ -742,7 +775,15 @@ window.__ModuleLoader__.load({
 
         return h(
           'div',
-          { className: overlayClass, style, role: 'dialog', 'aria-label': tSafe('finder.title') },
+          {
+            className: overlayClass,
+            style,
+            role: 'dialog',
+            'aria-label': tSafe('finder.title'),
+            // 标记：让 elementFromPoint 那一路能认出「这个位置是我们自己」。
+            // 用自定义属性而不是类名，避免和样式选择器耦合。
+            'data-wf-surface': 'finder',
+          },
           h(
             'div',
             {
@@ -827,7 +868,12 @@ window.__ModuleLoader__.load({
               ),
             )
             : null,
+          // 底部渐隐：照抄宿主 .SJMXQW_fade 的做法 —— 一条 24px 高的
+          // linear-gradient 盖在列表底部，从透明过渡到侧边栏底色。
+          // 原生就这么处理「列表还没结束但视觉上还要让位给底部元素」，
+          // 所以列表和底部卡片之间不会出现硬切边。
           hasQuery ? h('div', { className: 'wf-body' }, body) : null,
+          hasQuery ? h('div', { className: 'wf-fade', 'aria-hidden': true }) : null,
         );
       };
     }
@@ -1691,6 +1737,25 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
 .wf-overlay.is-inline .wf-body::-webkit-scrollbar-thumb:hover {
   background: var(--dsw-alias-scrollbar-hover-l2);
 }
+/* 底部渐隐：完全照抄宿主 .SJMXQW_fade 的思路 ——
+   24px 高、绝对定位贴底、从透明渐变到侧边栏底色、不接收鼠标事件。
+   原生用它来处理「列表在视觉上要给底部让位」，所以滚动内容
+   到边缘时是柔和淡出，而不是被一刀切断。
+   底色取 --wf-surface（.wf-overlay 上设的侧边栏实测色），
+   拿不到时退回宿主自己的 sidebar-fill 变量。 */
+.wf-overlay.is-inline .wf-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 24px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--wf-surface, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)))
+  );
+}
 /* 输入行：数值全部照抄宿主 .sectionHeader / .searchExpanded / .searchButton，
    这样展开后的观感和原生放大镜完全一致，看不出是两个来源。 */
 .wf-head {
@@ -2049,138 +2114,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   margin: 3px 2px;
   background: var(--dsw-alias-border-l2, var(--dsw-alias-border-l3));
 }
-/* #region 发图区下拉板块 */
-.wf-dock {
-  display: flex;
-  flex-direction: column;
-  margin: 0 2px 2px;
-  min-width: 0;
-}
-.wf-dock-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 3px 6px;
-  border: none;
-  border-radius: var(--dsw-radius-sm, 6px);
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-.wf-dock-toggle:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
-}
-.wf-dock-toggle:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: -2px;
-}
-.wf-dock-toggle:disabled { opacity: .6; cursor: default; }
-.wf-dock-caret {
-  flex: none;
-  width: 10px;
-  text-align: center;
-  font-size: 9px;
-  opacity: .8;
-}
-.wf-dock-note {
-  flex: none;
-  margin-left: 2px;
-  color: var(--dsw-alias-label-dimmed);
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.wf-dock-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  max-height: min(200px, 32vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  margin-top: 2px;
-  padding: 2px 0 0;
-}
-.wf-dock-panel::-webkit-scrollbar { width: 6px; }
-.wf-dock-panel::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--dsw-alias-scrollbar-bg-l2);
-}
-.wf-dock-panel::-webkit-scrollbar-thumb:hover {
-  background: var(--dsw-alias-scrollbar-hover-l2);
-}
-.wf-dock-group {
-  padding: 2px 6px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 16px;
-}
-.wf-dock-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  min-width: 0;
-  padding: 4px 6px;
-  border: none;
-  border-radius: var(--dsw-radius-sm, 6px);
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  line-height: 16px;
-  text-align: left;
-  cursor: pointer;
-}
-.wf-dock-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.wf-dock-row:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: -2px;
-}
-.wf-dock-name,
-.wf-dock-path {
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.wf-dock-path {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 14px;
-}
-.wf-dock-hint {
-  padding: 6px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
-}
-.wf-dock-action {
-  align-self: flex-start;
-  margin: 2px 6px 4px;
-  padding: 3px 6px;
-  border: none;
-  border-radius: var(--dsw-radius-sm, 6px);
-  background: transparent;
-  color: var(--dsw-alias-link);
-  font-size: 11px;
-  line-height: 16px;
-  cursor: pointer;
-}
-.wf-dock-action:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.wf-dock-action:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: -2px;
-}
-@media (max-height: 520px) {
-  .wf-dock-panel { max-height: 140px; }
-}
-/* #endregion */
 `;
 
     function applyCss() {
@@ -2331,194 +2264,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
     }
     // #endregion
 
-    // #region 发图区下拉板块
-    /*
-     * 挂在 `conversation.composer.dock`（kind: list / scope: session）。
-     * 这个槽的 inject 会给到 `keyboard`，也就是宿主的 SessionInputShell
-     * 实例，它的 actions 面是公开的草稿写入入口：
-     *   captureInsertion() → { draftRev, start, end }  当前光标与草稿版本
-     *   insertText(text, span)                          在 span 处插入（一次 paste 编辑）
-     *   setDraft(text)                                  整框覆盖
-     *
-     * 为什么要用 insertText 而不是 setDraft：
-     * setDraft 会带上 history-merge 标签并进上一条撤销记录，
-     * 用户按一次 Ctrl+Z 会把插入前的草稿一起吞掉；
-     * insertText 是独立的 paste 记录，撤销只回退这一次插入。
-     *
-     * 为什么不能「点最近文件 → 变成附件」：
-     * 宿主 addFiles(files) 收的是真实 File 对象，内部用 bridge.pathFor(file)
-     * 取本地路径再转成 @引用。浏览器端插件造不出带本地路径的 File，
-     * 所以这里走「插入 @路径 引用」这条路 —— 语义上等价，宿主本身也是
-     * 把文件引用渲染成 chip 的。
-     */
-    const MENTION_SAFE = /[\u0000-\u001f\u007f-\u009f"]/u;
-
-    /**
-     * 复刻宿主的 formatFileMention：无空格/引号时是 `@path`，
-     * 有空格或需要保留时是 `@"path"`，目录结尾补斜杠。
-     * 路径含控制字符或引号时返回 undefined（宿主也拒绝）。
-     */
-    function formatMention(path, kind) {
-      if (typeof path !== 'string' || path === '') return undefined;
-      const full = kind === 'directory' ? `${path}/` : path;
-      if (MENTION_SAFE.test(full)) return undefined;
-      if (!/\s/u.test(full)) return `@${full}`;
-      if (kind === 'directory') return `@"${full}`;
-      return `@"${full}"`;
-    }
-
-    /** 把路径写进草稿。优先 insertText（独立撤销步），失败退 setDraft。 */
-    function insertReference(keyboard, text) {
-      if (!keyboard || typeof text !== 'string' || text === '') return 'notReady';
-      const actions = keyboard.actions || keyboard;
-      try {
-        if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-          const span = actions.captureInsertion();
-          if (span && actions.insertText(text, span) === true) return 'inserted';
-        }
-      } catch { /* 落到降级路径 */ }
-      try {
-        const current = keyboard.draftSnapshot;
-        const base = typeof current === 'string' ? current : '';
-        if (typeof actions.setDraft === 'function') {
-          actions.setDraft(base ? `${base} ${text}` : text);
-          return 'inserted';
-        }
-      } catch { /* 忽略 */ }
-      return 'notReady';
-    }
-
-    /**
-     * 取工作区里最近改动的文件。
-     * 没有 mtime 可用（list 只给 name/type/size），所以用「遍历顺序 + 深度」
-     * 做近似：先列根目录，再按目录名序深入，浅层的排在前面。
-     * 这样至少稳定、可预测，不会每次刷新都换一批。
-     */
-    async function recentFiles(ctx, options) {
-      const opts = options || {};
-      const apis = readSearchApis(ctx);
-      if (apis.error) return { error: apis.error, files: [] };
-      const scope = currentScope(ctx);
-      if (!scope) return { error: 'no-session', files: [] };
-      const limit = Math.max(1, Number(opts.limit) || 12);
-      const walk = await walkWorkspace(ctx, {
-        signal: opts.signal,
-        excludeDirs: opts.excludeDirs,
-        // 多取一些再截断：浅层的排在前面，后面的可能都是深目录
-        maxResults: Math.max(limit * 3, 40),
-        maxDepth: Math.max(1, Number(opts.maxDepth) || 3),
-      });
-      if (walk.error) return { error: walk.error, files: [] };
-      return { error: null, files: (walk.files || []).slice(0, limit) };
-    }
-
-    /** 一行文件条目 */
-    function DockRow({ file, onPick }) {
-      const label = file.path || file.name;
-      return h(
-        'button',
-        {
-          type: 'button',
-          className: 'wf-dock-row',
-          title: label,
-          onClick: () => onPick(file),
-        },
-        h('span', { className: 'wf-dock-name' }, file.name || label),
-        h('span', { className: 'wf-dock-path' }, file.path || ''),
-      );
-    }
-
-    function makeComposerDock(ctx, config) {
-      return function ComposerDock(props) {
-        const keyboard = props && props.keyboard;
-        const [open, setOpen] = useState(false);
-        const [state, setState] = useState({ status: 'idle', files: [], error: null, note: '' });
-        const [busy, setBusy] = useState(false);
-
-        // 只在第一次展开时读一次，之后靠手动刷新，避免每次开合都扫盘
-        const load = useCallback(async () => {
-          setState((prev) => ({ ...prev, status: 'loading', error: null }));
-          try {
-            const res = await recentFiles(ctx, { limit: 12, maxDepth: 3 });
-            if (res.error) setState({ status: 'error', files: [], error: res.error, note: '' });
-            else setState({ status: 'done', files: res.files, error: null, note: '' });
-          } catch (error) {
-            setState({ status: 'error', files: [], error: error && error.message ? error.message : 'failed', note: '' });
-          }
-        }, []);
-
-        useEffect(() => {
-          if (!open) return undefined;
-          if (state.status !== 'idle') return undefined;
-          load();
-          return undefined;
-        }, [open, state.status, load]);
-
-        const pick = (file) => {
-          const text = formatMention(file.path || file.name, file.kind || 'file');
-          if (!text) {
-            setState((prev) => ({ ...prev, note: tSafe('dock.notReady') }));
-            return;
-          }
-          setBusy(true);
-          const outcome = insertReference(keyboard, text);
-          setBusy(false);
-          setState((prev) => ({ ...prev, note: outcome === 'inserted' ? tSafe('dock.inserted') : tSafe('dock.notReady') }));
-          if (outcome === 'inserted') {
-            setOpen(false);
-            window.setTimeout(() => setState((prev) => ({ ...prev, note: '' })), 1600);
-          }
-        };
-
-        const body = !open ? null : h(
-          'div',
-          { className: 'wf-dock-panel' },
-          state.status === 'loading'
-            ? h('div', { className: 'wf-dock-hint' }, tSafe('dock.loading'))
-            : state.status === 'error'
-              ? h('div', { className: 'wf-dock-hint' }, state.error === 'no-session' ? tSafe('dock.noSession') : tSafe('dock.failed'))
-              : state.files.length === 0
-                ? h('div', { className: 'wf-dock-hint' }, tSafe('dock.empty'))
-                : [
-                  h('div', { className: 'wf-dock-group' }, tSafe('dock.recent')),
-                  ...state.files.map((file) => h(DockRow, { key: file.path || file.name, file, onPick: pick })),
-                ],
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'wf-dock-action',
-              onClick: () => {
-                // 打开「查找」浮层并切到文件页签，让它去挑
-                setOpen(false);
-                openFinderOverlay();
-              },
-            },
-            tSafe('dock.open'),
-          ),
-        );
-
-        return h(
-          'div',
-          { className: `wf-dock${open ? ' is-open' : ''}` },
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'wf-dock-toggle',
-              'aria-expanded': open ? 'true' : 'false',
-              disabled: busy,
-              onClick: () => setOpen((v) => !v),
-            },
-            h('span', { className: 'wf-dock-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
-            h('span', null, tSafe('dock.toggle')),
-            state.note ? h('span', { className: 'wf-dock-note' }, state.note) : null,
-          ),
-          body,
-        );
-      };
-    }
-    // #endregion
 
     // #region 兜底页（防 selectPanel 抛错）
     // 面板行已从 sidebar.panellist 移除，这里只作为极端情况的安全网：
@@ -2806,15 +2551,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
           name: 'shell.overlay',
           id: 'sidebar-finder-overlay',
         }, SearchOverlay));
-
-        // 发图区下拉板块：官方给的输入框下方插槽
-        // （conversation.composer.dock，kind: list / scope: session）
-        const ComposerDock = makeComposerDock(ctx, config);
-        ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-          name: 'conversation.composer.dock',
-          id: 'sidebar-finder-dock',
-          order: 30,
-        }, ComposerDock));
       },
     };
     // #endregion
