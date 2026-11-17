@@ -168,13 +168,20 @@
       }
       const maxHits = Math.max(1, Number(options && options.maxHits) || 20);
       const otherLimit = Math.max(0, Number(options && options.maxSessionCandidates) || 6);
+      // 当前会话最多只占一半配额。
+      // 这个搜索是**全局**的（当前会话 + 其他会话），但当前会话先搜，
+      // 若把 maxHits 全给它，一次命中几十条的长会话就把配额吃干，
+      // 下面「其他会话」的循环会在第一条就撞上 results.length >= maxHits 直接 break，
+      // 表现出来的症状就是「明明说全局搜索，却只搜了当前对话」。
+      // 一半是保守值：短会话命中少时，剩下的配额自然还回给其他会话。
+      const hereHits = otherLimit > 0 ? Math.max(1, Math.ceil(maxHits / 2)) : maxHits;
       const results = [];
       let truncated = false;
 
       // 1) 当前会话
       if (!(signal && signal.aborted)) {
         const here = await searchSessionMessages(ctx, scope.sessionId, lowerQuery, {
-          signal, maxHits, maxPages: options && options.maxPages,
+          signal, maxHits: hereHits, maxPages: options && options.maxPages,
         });
         if (here && here.hits && here.hits.length) {
           for (const hit of here.hits) {

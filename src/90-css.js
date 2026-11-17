@@ -275,16 +275,12 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   padding: 2px 8px 0;
 }
 .wf-overlay.is-inline .wf-group {
-  /* 分组标题吸顶：滚动时「当前会话 / 其他会话」始终可辨，
-     否则一滚就不知道自己在看哪一组 */
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 8px 8px 4px;
-  /* 必须不透明：吸顶标题下滚动着结果行，底色一旦透明就会叠字。
-     JS 里把 --wf-surface 兜成了可解析的属性引用，这里再给一层保险 ——
-     不要用 transparent，否则出问题时症状是「文字浮在上面」而不是明显报错。 */
-  background: var(--wf-surface, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)));
+  /* 分组标题就是个普通小标签，不吸顶。
+     这里曾经用 position:sticky + 不透明底色，本意是「滚动时仍知道在看哪一组」，
+     但结果是一块横贯整行的浮板压在结果上，比它想解决的问题更碍眼；
+     而且这层底色必须跟侧边栏实测色完全一致才不露馅，量偏一点就是一道色带。
+     结果本来就按组连续排列、组内行又都带角色标记，不吸顶也分得清。 */
+  padding: 10px 8px 2px;
 }
 .wf-row {
   display: flex;
