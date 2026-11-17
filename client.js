@@ -477,6 +477,8 @@ window.__ModuleLoader__.load({
         const [state, setState] = useState({ status: 'idle', results: [], scanned: 0, truncated: false, error: null });
         const inputRef = useRef(null);
         const abortRef = useRef(null);
+        const bodyRef = useRef(null);
+        const [bodyScrollable, setBodyScrollable] = useState(false);
 
         // 打开期间让宿主的那一行（和列表）让位。
         // 除了写属性给 CSS 用，这里还直接改内联样式 —— 属性选择器一旦因为
@@ -626,7 +628,13 @@ window.__ModuleLoader__.load({
             // Math.max(120, …) 兜底 —— 矮窗口下可用高度本来就不到 120，
             // 兜底反而会把浮层顶出边界、压到底部卡片上。
             // bodyHeight 已经把底部卡片让出来了，直接用即可。
-            height: hasQuery
+            // 高度跟着内容走：结果只有几条时就只占几行，不再把整块
+            // 可用空间铺满、下面留一大片空底色（DSH 2.0.23 把侧边栏
+            // 区域拉高后，那块空白会拖得很长）。
+            // 可用空间退化成 maxHeight：内容少时无事发生，内容多时
+            // 照样在 bottomLimit 处截断并出滚动条。
+            height: 'auto',
+            maxHeight: hasQuery
               ? Math.max(box.headHeight, box.bodyHeight + box.headHeight)
               : box.headHeight,
           }
@@ -642,6 +650,22 @@ window.__ModuleLoader__.load({
         const overlayClass = box
           ? `wf-overlay is-inline${hasQuery ? '' : ' is-compact'}`
           : 'wf-overlay';
+
+        // 底部渐隐只在结果真的滚出可视区时才画：高度改成随内容之后，
+        // 内容不足一屏时那条 24px 渐变会直接压在最后一行上。
+        useEffect(() => {
+          const el = bodyRef.current;
+          if (!isOpen || !el) {
+            setBodyScrollable(false);
+            return undefined;
+          }
+          const update = () => setBodyScrollable(el.scrollHeight - el.clientHeight > 1);
+          update();
+          if (typeof ResizeObserver !== 'function') return undefined;
+          const ro = new ResizeObserver(update);
+          ro.observe(el);
+          return () => ro.disconnect();
+        }, [isOpen, query, mode, state, box]);
 
         const body = [];
         // 空/等待/出错这些「没有结果」的状态统一用居中的小块呈现，
@@ -872,8 +896,8 @@ window.__ModuleLoader__.load({
           // linear-gradient 盖在列表底部，从透明过渡到侧边栏底色。
           // 原生就这么处理「列表还没结束但视觉上还要让位给底部元素」，
           // 所以列表和底部卡片之间不会出现硬切边。
-          hasQuery ? h('div', { className: 'wf-body' }, body) : null,
-          hasQuery ? h('div', { className: 'wf-fade', 'aria-hidden': true }) : null,
+          hasQuery ? h('div', { className: 'wf-body', ref: bodyRef }, body) : null,
+          hasQuery && bodyScrollable ? h('div', { className: 'wf-fade', 'aria-hidden': true }) : null,
         );
       };
     }
@@ -2036,36 +2060,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   animation: wf-fade 140ms var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)) both;
 }
 
-/* ---- 「更多」里被收纳的面板行（自绘，不用 primitives） ---- */
-/* 数值照抄宿主 Menu.module.css 的 .item / .separator，
-   保证自绘行和原生菜单项在同一张卡片里看不出差别。 */
-.wf-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: var(--dsw-radius-md);
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
-}
-.wf-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.wf-menu-item:focus-visible {
-  background: var(--dsw-alias-interactive-bg-hover);
-  outline: none;
-}
-.wf-menu-item[data-current="true"] { color: var(--dsw-alias-state-business-primary); }
-/* 被收纳面板的容器：限高 + 内部滚动。
-   宿主菜单自身有 max-height，行数一多就把最后一行截断；
-   给这一段单独限高后，菜单总高是稳定的，超出只在这里滚。 */
 /* 「更多」菜单要和它自己那一行按钮的背景严丝合缝对齐。
    宿主定位是 x = anchorRect.right - 菜单宽度，所以只要菜单宽度 === 锚点按钮宽度，
    左边缘就会自动落在按钮左边缘上。
@@ -2076,27 +2070,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   width: var(--wf-more-w, 288px) !important;
   min-width: var(--wf-more-w, 288px) !important;
   max-width: var(--wf-more-w, 288px) !important;
-}
-/* 菜单变窄后长标签要能省略，不能撑破卡片 */
-.wf-menu-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wf-menu-list {
-  /* 这里刻意不设 max-height / overflow：
-     宿主的 Menu 外层已经有 .scrollable（max-height 按视口算），
-     自己再套一层就会出第二个滚动条，看着像菜单里嵌了个小窗口。
-     交给宿主统一滚，行为跟原生项完全一致。 */
-  display: flex;
-  flex-direction: column;
-}
-.wf-menu-sep {
-  height: 0.5px;
-  margin: 3px 2px;
-  background: var(--dsw-alias-border-l2, var(--dsw-alias-border-l3));
 }
 `;
 
@@ -2269,10 +2242,15 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
      * `sidebar.panellist.actions` 的注册者，而那个槽只在「更多」展开时才挂载。
      * 所以「启动即收纳」在公开 API 上做不到。
      *
-     * 这里换一条路：不改宿主的置顶状态，直接用样式把非白名单的面板行隐藏，
-     * 再把自己注册进 `sidebar.panellist.actions`，把这些面板补进「更多」菜单。
-     * 宿主默认的「更多」只放「浏览更多插件/创建你的插件」，不列面板，
-     * 所以补进去的这几行既是收纳结果，也是唯一的入口。
+     * 这里用两条路配合：
+     *   ① 样式表按 aria-label 直接隐藏非白名单的面板行 —— 启动瞬间就生效；
+     *   ② 注册进 `sidebar.panellist.actions`，借菜单挂载时交出的
+     *      `onPinnedChange` 把官方 pin 状态同步一次，宿主随后自己把
+     *      收起的行从侧边栏移除（比纯样式彻底，也不再依赖 aria-label）。
+     *
+     * 不要再往这个菜单里补自绘的行：DSH 2.0.23 起宿主
+     * （@deepseek-ai/dsh-client-ui-entry-customization）自己就会把未固定的
+     * 面板列进「更多」，带图标、勾选和固定按钮。再画一遍就是同一个面板两遍。
      */
 
     /** Config 里的白名单，规范化成 Set；`plugins` 与查找行自身永远可见。 */
@@ -2320,7 +2298,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
       const list = Array.from(labels || []);
       if (!list.length) return '';
       const selectors = list
-        .map((label) => `${SEL_SIDEBAR} nav[class*="_panelList"] > [class*="_panelRow"][aria-label=${cssString(label)}]`)
+        .map((label) => `${SEL_SIDEBAR} nav[class*="_panelList"] [class*="_panelRow"][aria-label=${cssString(label)}]`)
         .join(',\n');
       return `${selectors} { display: none !important; }`;
     }
@@ -2334,13 +2312,10 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
      * 所以菜单一打开，就按 Config 把该露的固定、其余收起——宿主随后自己把
      * 收起的行从侧边栏移除，比纯 CSS 隐藏彻底，也不依赖 aria-label 是否对得上。
      */
-    function makeMorePanels(getHiddenIds, getVisible, config) {
-      return function MorePanels(props) {
+    function makeMorePanels(getVisible, config) {
+      return function SyncPins(props) {
         const entries = (props && props.entries) || [];
-        const onOpen = props && props.onOpen;
-        const onDismiss = props && props.onDismiss;
         const onPinnedChange = props && props.onPinnedChange;
-        const hiddenIds = getHiddenIds();
 
         // 菜单挂载即按 Config 同步一次 pin 状态（每个面板只调一次）
         useEffect(() => {
@@ -2359,35 +2334,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
           // eslint-disable-next-line react-hooks/exhaustive-deps
         }, []);
 
-        const hidden = entries.filter((entry) => entry && hiddenIds.has(entry.id));
-        if (!hidden.length) return null;
-        // 这些行是补进「更多」菜单的，行数一多就会把菜单撑到超过宿主的高度上限，
-        // 导致最后一行被拦腰截断（看着像菜单漏了半个）。
-        // 所以给它们单独一个带高度上限的滚动容器：菜单总高保持住，
-        // 多出来的部分只在这一段里滚，宿主菜单本身不再被截断。
-        return h(
-          React.Fragment,
-          null,
-          h('div', { className: 'wf-menu-sep', role: 'separator' }),
-          h(
-            'div',
-            { className: 'wf-menu-list' },
-            hidden.map((entry) => h(
-              'button',
-              {
-                key: entry.id,
-                type: 'button',
-                className: 'wf-menu-item',
-                'data-current': entry.active ? 'true' : undefined,
-                onClick: () => {
-                  if (typeof onDismiss === 'function') onDismiss();
-                  if (typeof onOpen === 'function') onOpen(entry.id);
-                },
-              },
-              h('span', { className: 'wf-menu-label' }, entry.label || entry.id),
-            )),
-          ),
-        );
+        return null;
       };
     }
     // #endregion
@@ -2446,10 +2393,8 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
         // 「更多」锚点宽度 → CSS 变量（让菜单与那一行按钮对齐）
         ctx.effect(() => measureMoreAnchor(), 'sidebar-finder: more-anchor');
 
-        // ---- 收纳：隐藏非白名单面板行 + 把它们补进「更多」 ----
+        // ---- 收纳：隐藏非白名单面板行 + 同步官方 pin 状态 ----
         const visible = normalizeVisible(config);
-        // 收纳结果：id 给「更多」菜单补行用，label 给隐藏样式用，两者同源同时更新
-        const hiddenIds = new Set();
 
         // 收纳样式单独一张表，随面板清单变化重建
         let collapseStyle = null;
@@ -2461,15 +2406,13 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
           } catch {
             entries = [];
           }
-          // 先算 id → label，写入共享的 hiddenIds
-          hiddenIds.clear();
+          // 算出要隐藏的面板标签（隐藏规则按 aria-label 匹配）
           const labels = new Set();
           (entries || []).forEach((entry) => {
             const options = entry && entry.options;
             if (!options || typeof options.id !== 'string') return;
             if (options.id === PANEL_ID || visible.has(options.id)) return;
             if (config && config.collapseOthers === false) return;
-            hiddenIds.add(options.id);
             const label = panelLabelOf(options);
             if (label) labels.add(label);
           });
@@ -2506,7 +2449,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
             if (collapseStyle && collapseStyle.parentNode) collapseStyle.parentNode.removeChild(collapseStyle);
             collapseStyle = null;
             lastCss = '';
-            hiddenIds.clear();
           };
         }, 'sidebar-finder: collapse');
 
@@ -2515,7 +2457,7 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
         ctx.effect(() => () => teardownVars(), 'sidebar-finder: vars-teardown');
 
         // 「更多」里补出被收纳的面板，并在菜单打开时同步一次官方 pin 状态
-        const MorePanels = makeMorePanels(() => hiddenIds, () => visible, config);
+        const MorePanels = makeMorePanels(() => visible, config);
         ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
           name: 'sidebar.panellist.actions',
           id: 'sidebar-finder-more',

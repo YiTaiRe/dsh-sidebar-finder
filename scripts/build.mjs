@@ -17,8 +17,10 @@
  *   node packages/dsh-sidebar-finder/scripts/build.mjs --check  只校验，不写文件
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import url from 'node:url';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -81,7 +83,9 @@ const pieces = ORDER.map((name) => {
 let code = pieces.map((p) => p.body).join('');
 
 // ---------- 3. 校验 ----------
-const tmp = path.join(PKG, '.client.build.tmp.js');
+// 临时文件放系统临时目录：放在 PKG 里会让 `--check` 在只读沙箱下直接
+// EPERM（它名不副实，本来不该写任何项目文件）。
+const tmp = path.join(os.tmpdir(), `.client.build.${process.pid}.tmp.js`);
 fs.writeFileSync(tmp, code, 'utf8');
 
 function fail(msg) {
@@ -92,10 +96,12 @@ function fail(msg) {
 }
 
 try {
-  execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' });
+  // vm.Script 就是 node --check 在进程内做的事：V8 解析整段脚本，
+  // 语法错就抛 SyntaxError。不起子进程——受限沙箱里 spawn 会 EPERM。
+  new vm.Script(code, { filename: 'client.build.js' });
   console.log('✓ 语法检查通过');
 } catch (e) {
-  fail('语法检查失败：\n' + String(e.stderr || e.message));
+  fail('语法检查失败：\n' + String(e && e.stack ? e.stack : e));
 }
 
 // 冒烟测试：脚本里写死了 packages/dsh-sidebar-finder/client.js 这个路径，
@@ -103,13 +109,13 @@ try {
 const smoke = path.resolve(PKG, '../../_tmp/smoke-client.mjs');
 if (fs.existsSync(smoke)) {
   try {
-    execFileSync(process.execPath, [smoke], {
-      stdio: 'pipe',
-      env: { ...process.env, WF_CLIENT_OVERRIDE: tmp },
-    });
+    // 用 import() 在本进程内加载冒烟脚本，避免 spawn。
+    // 脚本自己从 process.env.WF_CLIENT_OVERRIDE 读拼装结果。
+    process.env.WF_CLIENT_OVERRIDE = tmp;
+    await import(url.pathToFileURL(smoke).href);
     console.log('✓ 冒烟测试通过');
   } catch (e) {
-    fail('冒烟测试失败：\n' + String(e.stdout || '') + String(e.stderr || e.message));
+    fail('冒烟测试失败：\n' + String(e && e.stack ? e.stack : e));
   }
 } else {
   console.warn('! 未找到冒烟测试脚本，跳过（' + smoke + '）');
@@ -122,6 +128,8 @@ if (checkOnly) {
   process.exit(0);
 }
 
-fs.renameSync(tmp, OUT);
+// tmp 在系统临时目录（可能是另一个盘），renameSync 会 EXDEV，直接写。
+fs.writeFileSync(OUT, code, 'utf8');
+try { fs.rmSync(tmp, { force: true }); } catch { /* 忽略 */ }
 const lineCount = code.split('\n').length - (code.endsWith('\n') ? 1 : 0);
 console.log(`✓ 已写入 client.js（${pieces.length} 片拼成，${lineCount} 行，${Buffer.byteLength(code)} 字节）`);

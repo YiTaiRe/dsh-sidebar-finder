@@ -448,36 +448,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   animation: wf-fade 140ms var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)) both;
 }
 
-/* ---- 「更多」里被收纳的面板行（自绘，不用 primitives） ---- */
-/* 数值照抄宿主 Menu.module.css 的 .item / .separator，
-   保证自绘行和原生菜单项在同一张卡片里看不出差别。 */
-.wf-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: var(--dsw-radius-md);
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
-}
-.wf-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.wf-menu-item:focus-visible {
-  background: var(--dsw-alias-interactive-bg-hover);
-  outline: none;
-}
-.wf-menu-item[data-current="true"] { color: var(--dsw-alias-state-business-primary); }
-/* 被收纳面板的容器：限高 + 内部滚动。
-   宿主菜单自身有 max-height，行数一多就把最后一行截断；
-   给这一段单独限高后，菜单总高是稳定的，超出只在这里滚。 */
 /* 「更多」菜单要和它自己那一行按钮的背景严丝合缝对齐。
    宿主定位是 x = anchorRect.right - 菜单宽度，所以只要菜单宽度 === 锚点按钮宽度，
    左边缘就会自动落在按钮左边缘上。
@@ -488,27 +458,6 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   width: var(--wf-more-w, 288px) !important;
   min-width: var(--wf-more-w, 288px) !important;
   max-width: var(--wf-more-w, 288px) !important;
-}
-/* 菜单变窄后长标签要能省略，不能撑破卡片 */
-.wf-menu-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wf-menu-list {
-  /* 这里刻意不设 max-height / overflow：
-     宿主的 Menu 外层已经有 .scrollable（max-height 按视口算），
-     自己再套一层就会出第二个滚动条，看着像菜单里嵌了个小窗口。
-     交给宿主统一滚，行为跟原生项完全一致。 */
-  display: flex;
-  flex-direction: column;
-}
-.wf-menu-sep {
-  height: 0.5px;
-  margin: 3px 2px;
-  background: var(--dsw-alias-border-l2, var(--dsw-alias-border-l3));
 }
 `;
 

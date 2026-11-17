@@ -6,10 +6,15 @@
      * `sidebar.panellist.actions` 的注册者，而那个槽只在「更多」展开时才挂载。
      * 所以「启动即收纳」在公开 API 上做不到。
      *
-     * 这里换一条路：不改宿主的置顶状态，直接用样式把非白名单的面板行隐藏，
-     * 再把自己注册进 `sidebar.panellist.actions`，把这些面板补进「更多」菜单。
-     * 宿主默认的「更多」只放「浏览更多插件/创建你的插件」，不列面板，
-     * 所以补进去的这几行既是收纳结果，也是唯一的入口。
+     * 这里用两条路配合：
+     *   ① 样式表按 aria-label 直接隐藏非白名单的面板行 —— 启动瞬间就生效；
+     *   ② 注册进 `sidebar.panellist.actions`，借菜单挂载时交出的
+     *      `onPinnedChange` 把官方 pin 状态同步一次，宿主随后自己把
+     *      收起的行从侧边栏移除（比纯样式彻底，也不再依赖 aria-label）。
+     *
+     * 不要再往这个菜单里补自绘的行：DSH 2.0.23 起宿主
+     * （@deepseek-ai/dsh-client-ui-entry-customization）自己就会把未固定的
+     * 面板列进「更多」，带图标、勾选和固定按钮。再画一遍就是同一个面板两遍。
      */
 
     /** Config 里的白名单，规范化成 Set；`plugins` 与查找行自身永远可见。 */
@@ -57,7 +62,7 @@
       const list = Array.from(labels || []);
       if (!list.length) return '';
       const selectors = list
-        .map((label) => `${SEL_SIDEBAR} nav[class*="_panelList"] > [class*="_panelRow"][aria-label=${cssString(label)}]`)
+        .map((label) => `${SEL_SIDEBAR} nav[class*="_panelList"] [class*="_panelRow"][aria-label=${cssString(label)}]`)
         .join(',\n');
       return `${selectors} { display: none !important; }`;
     }
@@ -71,13 +76,10 @@
      * 所以菜单一打开，就按 Config 把该露的固定、其余收起——宿主随后自己把
      * 收起的行从侧边栏移除，比纯 CSS 隐藏彻底，也不依赖 aria-label 是否对得上。
      */
-    function makeMorePanels(getHiddenIds, getVisible, config) {
-      return function MorePanels(props) {
+    function makeMorePanels(getVisible, config) {
+      return function SyncPins(props) {
         const entries = (props && props.entries) || [];
-        const onOpen = props && props.onOpen;
-        const onDismiss = props && props.onDismiss;
         const onPinnedChange = props && props.onPinnedChange;
-        const hiddenIds = getHiddenIds();
 
         // 菜单挂载即按 Config 同步一次 pin 状态（每个面板只调一次）
         useEffect(() => {
@@ -96,35 +98,7 @@
           // eslint-disable-next-line react-hooks/exhaustive-deps
         }, []);
 
-        const hidden = entries.filter((entry) => entry && hiddenIds.has(entry.id));
-        if (!hidden.length) return null;
-        // 这些行是补进「更多」菜单的，行数一多就会把菜单撑到超过宿主的高度上限，
-        // 导致最后一行被拦腰截断（看着像菜单漏了半个）。
-        // 所以给它们单独一个带高度上限的滚动容器：菜单总高保持住，
-        // 多出来的部分只在这一段里滚，宿主菜单本身不再被截断。
-        return h(
-          React.Fragment,
-          null,
-          h('div', { className: 'wf-menu-sep', role: 'separator' }),
-          h(
-            'div',
-            { className: 'wf-menu-list' },
-            hidden.map((entry) => h(
-              'button',
-              {
-                key: entry.id,
-                type: 'button',
-                className: 'wf-menu-item',
-                'data-current': entry.active ? 'true' : undefined,
-                onClick: () => {
-                  if (typeof onDismiss === 'function') onDismiss();
-                  if (typeof onOpen === 'function') onOpen(entry.id);
-                },
-              },
-              h('span', { className: 'wf-menu-label' }, entry.label || entry.id),
-            )),
-          ),
-        );
+        return null;
       };
     }
     // #endregion

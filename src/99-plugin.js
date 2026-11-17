@@ -53,10 +53,8 @@
         // 「更多」锚点宽度 → CSS 变量（让菜单与那一行按钮对齐）
         ctx.effect(() => measureMoreAnchor(), 'sidebar-finder: more-anchor');
 
-        // ---- 收纳：隐藏非白名单面板行 + 把它们补进「更多」 ----
+        // ---- 收纳：隐藏非白名单面板行 + 同步官方 pin 状态 ----
         const visible = normalizeVisible(config);
-        // 收纳结果：id 给「更多」菜单补行用，label 给隐藏样式用，两者同源同时更新
-        const hiddenIds = new Set();
 
         // 收纳样式单独一张表，随面板清单变化重建
         let collapseStyle = null;
@@ -68,15 +66,13 @@
           } catch {
             entries = [];
           }
-          // 先算 id → label，写入共享的 hiddenIds
-          hiddenIds.clear();
+          // 算出要隐藏的面板标签（隐藏规则按 aria-label 匹配）
           const labels = new Set();
           (entries || []).forEach((entry) => {
             const options = entry && entry.options;
             if (!options || typeof options.id !== 'string') return;
             if (options.id === PANEL_ID || visible.has(options.id)) return;
             if (config && config.collapseOthers === false) return;
-            hiddenIds.add(options.id);
             const label = panelLabelOf(options);
             if (label) labels.add(label);
           });
@@ -113,7 +109,6 @@
             if (collapseStyle && collapseStyle.parentNode) collapseStyle.parentNode.removeChild(collapseStyle);
             collapseStyle = null;
             lastCss = '';
-            hiddenIds.clear();
           };
         }, 'sidebar-finder: collapse');
 
@@ -122,7 +117,7 @@
         ctx.effect(() => () => teardownVars(), 'sidebar-finder: vars-teardown');
 
         // 「更多」里补出被收纳的面板，并在菜单打开时同步一次官方 pin 状态
-        const MorePanels = makeMorePanels(() => hiddenIds, () => visible, config);
+        const MorePanels = makeMorePanels(() => visible, config);
         ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
           name: 'sidebar.panellist.actions',
           id: 'sidebar-finder-more',

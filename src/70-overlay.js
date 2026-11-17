@@ -9,6 +9,8 @@
         const [state, setState] = useState({ status: 'idle', results: [], scanned: 0, truncated: false, error: null });
         const inputRef = useRef(null);
         const abortRef = useRef(null);
+        const bodyRef = useRef(null);
+        const [bodyScrollable, setBodyScrollable] = useState(false);
 
         // 打开期间让宿主的那一行（和列表）让位。
         // 除了写属性给 CSS 用，这里还直接改内联样式 —— 属性选择器一旦因为
@@ -158,7 +160,13 @@
             // Math.max(120, …) 兜底 —— 矮窗口下可用高度本来就不到 120，
             // 兜底反而会把浮层顶出边界、压到底部卡片上。
             // bodyHeight 已经把底部卡片让出来了，直接用即可。
-            height: hasQuery
+            // 高度跟着内容走：结果只有几条时就只占几行，不再把整块
+            // 可用空间铺满、下面留一大片空底色（DSH 2.0.23 把侧边栏
+            // 区域拉高后，那块空白会拖得很长）。
+            // 可用空间退化成 maxHeight：内容少时无事发生，内容多时
+            // 照样在 bottomLimit 处截断并出滚动条。
+            height: 'auto',
+            maxHeight: hasQuery
               ? Math.max(box.headHeight, box.bodyHeight + box.headHeight)
               : box.headHeight,
           }
@@ -174,6 +182,22 @@
         const overlayClass = box
           ? `wf-overlay is-inline${hasQuery ? '' : ' is-compact'}`
           : 'wf-overlay';
+
+        // 底部渐隐只在结果真的滚出可视区时才画：高度改成随内容之后，
+        // 内容不足一屏时那条 24px 渐变会直接压在最后一行上。
+        useEffect(() => {
+          const el = bodyRef.current;
+          if (!isOpen || !el) {
+            setBodyScrollable(false);
+            return undefined;
+          }
+          const update = () => setBodyScrollable(el.scrollHeight - el.clientHeight > 1);
+          update();
+          if (typeof ResizeObserver !== 'function') return undefined;
+          const ro = new ResizeObserver(update);
+          ro.observe(el);
+          return () => ro.disconnect();
+        }, [isOpen, query, mode, state, box]);
 
         const body = [];
         // 空/等待/出错这些「没有结果」的状态统一用居中的小块呈现，
@@ -404,8 +428,8 @@
           // linear-gradient 盖在列表底部，从透明过渡到侧边栏底色。
           // 原生就这么处理「列表还没结束但视觉上还要让位给底部元素」，
           // 所以列表和底部卡片之间不会出现硬切边。
-          hasQuery ? h('div', { className: 'wf-body' }, body) : null,
-          hasQuery ? h('div', { className: 'wf-fade', 'aria-hidden': true }) : null,
+          hasQuery ? h('div', { className: 'wf-body', ref: bodyRef }, body) : null,
+          hasQuery && bodyScrollable ? h('div', { className: 'wf-fade', 'aria-hidden': true }) : null,
         );
       };
     }
