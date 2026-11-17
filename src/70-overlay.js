@@ -135,6 +135,26 @@
           };
         }, [isOpen, query, mode]);
 
+        // 注意：这个 effect 必须在下面的 `if (!isOpen) return null` 之前。
+        // 早退之后再调 hook，关闭时 4 个、打开时 5 个，React 直接抛
+        // "Rendered more hooks than during the previous render"，
+        // 错误边界把整个标题行卸载 —— 表现就是点了图标就没了。
+        // 底部渐隐只在结果真的滚出可视区时才画：高度改成随内容之后，
+        // 内容不足一屏时那条 24px 渐变会直接压在最后一行上。
+        useEffect(() => {
+          const el = bodyRef.current;
+          if (!isOpen || !el) {
+            setBodyScrollable(false);
+            return undefined;
+          }
+          const update = () => setBodyScrollable(el.scrollHeight - el.clientHeight > 1);
+          update();
+          if (typeof ResizeObserver !== 'function') return undefined;
+          const ro = new ResizeObserver(update);
+          ro.observe(el);
+          return () => ro.disconnect();
+        }, [isOpen, query, mode, state, box]);
+
         if (!isOpen) return null;
 
         // 照宿主的会话搜索做：展开只把标题行换成输入框，下面的会话列表照常显示；
@@ -182,22 +202,6 @@
         const overlayClass = box
           ? `wf-overlay is-inline${hasQuery ? '' : ' is-compact'}`
           : 'wf-overlay';
-
-        // 底部渐隐只在结果真的滚出可视区时才画：高度改成随内容之后，
-        // 内容不足一屏时那条 24px 渐变会直接压在最后一行上。
-        useEffect(() => {
-          const el = bodyRef.current;
-          if (!isOpen || !el) {
-            setBodyScrollable(false);
-            return undefined;
-          }
-          const update = () => setBodyScrollable(el.scrollHeight - el.clientHeight > 1);
-          update();
-          if (typeof ResizeObserver !== 'function') return undefined;
-          const ro = new ResizeObserver(update);
-          ro.observe(el);
-          return () => ro.disconnect();
-        }, [isOpen, query, mode, state, box]);
 
         const body = [];
         // 空/等待/出错这些「没有结果」的状态统一用居中的小块呈现，
