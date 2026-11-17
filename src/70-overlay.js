@@ -174,7 +174,14 @@
             // 同时存成变量：吸顶的分组标题要用同一个颜色，
             // 否则文字会从它下面透上来。
             background: box.sidebarFill || undefined,
-            '--wf-surface': box.sidebarFill || 'transparent',
+            // 吸顶分组标题的底色。这里**不能**写成 `|| 'transparent'`：
+            // 自定义属性一旦被显式赋成 transparent，.wf-group 里
+            // `var(--wf-surface, 兜底值)` 的兜底就永远不生效（变量存在即命中），
+            // 结果是滚动时下面的行从标题底下透上来。
+            // 改成仍能解析的属性引用：--dsw-specific-sidebar-fill 定义在 body 上，
+            // 浮层挂在 shell.overlay 也能继承到。
+            '--wf-surface': box.sidebarFill
+              || 'var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base))',
             // 空查询：只占标题行那一行的高度，不碰下面的列表。
             // 有查询：铺到「底栏卡片上沿」为止。注意这里不能再用
             // Math.max(120, …) 兜底 —— 矮窗口下可用高度本来就不到 120，

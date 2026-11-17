@@ -281,7 +281,10 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
   top: 0;
   z-index: 1;
   padding: 8px 8px 4px;
-  background: var(--wf-surface, transparent);
+  /* 必须不透明：吸顶标题下滚动着结果行，底色一旦透明就会叠字。
+     JS 里把 --wf-surface 兜成了可解析的属性引用，这里再给一层保险 ——
+     不要用 transparent，否则出问题时症状是「文字浮在上面」而不是明显报错。 */
+  background: var(--wf-surface, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)));
 }
 .wf-row {
   display: flex;
