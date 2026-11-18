@@ -203,19 +203,38 @@
       }
 
       // 2) 其他会话：先拿候选
+      // 这一段每一步失败都可能让「其他会话」整组消失，而症状与「没有匹配」
+      // 完全一样，所以每一环都记下原因，由界面在缺组时显示出来。
       let candidates = [];
+      const otherDiag = [];
       try {
         const sessions = serviceOf(ctx, 'sessions');
-        if (sessions && typeof sessions.search === 'function') {
+        if (!sessions) {
+          otherDiag.push('sessions 服务取不到');
+        } else if (typeof sessions.search !== 'function') {
+          otherDiag.push('sessions.search 不是函数');
+        } else {
           const res = await sessions.search(query, signal);
-          if (res && res.ok && res.value && Array.isArray(res.value.items)) {
-            candidates = res.value.items
-              .filter((item) => item && item.sessionId && item.sessionId !== scope.sessionId)
-              .slice(0, otherLimit);
+          if (!res) {
+            otherDiag.push('search 返回空');
+          } else if (!res.ok) {
+            const e = res.error;
+            otherDiag.push(`search 失败: ${(e && (e.code || e.message)) || String(e)}`);
+          } else if (!res.value || !Array.isArray(res.value.items)) {
+            otherDiag.push('search 结果结构不对');
+          } else {
+            const all = res.value.items;
+            const others = all.filter((item) => item && item.sessionId && item.sessionId !== scope.sessionId);
+            candidates = others.slice(0, otherLimit);
+            otherDiag.push(
+              `候选 ${others.length}/${all.length}`
+              + (otherLimit < others.length ? `(上限 ${otherLimit})` : ''),
+            );
             if (res.value.hasMore) truncated = true;
           }
         }
-      } catch {
+      } catch (error) {
+        otherDiag.push(`search 抛错: ${error && error.message ? error.message : String(error)}`);
         candidates = [];
       }
 
@@ -247,7 +266,11 @@
         if (found.truncated) truncated = true;
       }
 
-      return { error: null, results, scanned: results.length, truncated, scope };
+      return {
+        error: null, results, scanned: results.length, truncated, scope,
+        // 仅消息检索有：其他会话这一组为什么可能是空的
+        stats: { otherDiag, otherCount: candidates.length },
+      };
     }
 
     /**

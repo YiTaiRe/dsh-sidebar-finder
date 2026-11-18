@@ -265,6 +265,16 @@
             tSafe('finder.count').replace('{n}', String(state.results.length)),
             state.truncated ? ` · ${tSafe('finder.truncated')}` : '',
           ));
+          // 「其他会话」这一组缺席时，把候选环节的实况写出来。
+          // 不写的话，「没有匹配」和「根本没搜」在界面上长得一模一样。
+          if (mode === 'messages' && state.stats && state.stats.otherDiag
+              && !state.results.some((item) => item.scope === 'other')) {
+            body.push(h(
+              'div',
+              { key: 'other-diag', className: 'wf-diag' },
+              `其他会话: ${state.stats.otherDiag.join(' | ')}`,
+            ));
+          }
           if (mode === 'messages') {
             // 按「当前会话 / 其他会话」分组，避免长结果里分不清来源
             const groups = [
