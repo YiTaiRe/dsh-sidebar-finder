@@ -145,6 +145,44 @@
     }
 
     /**
+     * 不依赖宿主全文索引的候选会话枚举。
+     *
+     * 宿主的会话全文索引是**可选**的：dsh-base 的 cordis.patch.yml 里
+     * `session-query-sqlite` 配的是 `openAt: never`，注释写明
+     * 「Full-text session search is opt-in」，设成 never 时服务仍然挂载
+     * （标题、血缘这些精确读照常可用），但任何搜索调用都会抛
+     * SESSION_QUERY_SEARCH_DISABLED。没有 profile 覆盖的情况下，
+     * sessions.search() 100% 失败，原来的 catch 又把它吞成空数组，
+     * 症状就是「说全局搜索，却只有当前会话」。
+     *
+     * 退路是直接读列表快照：它不经过索引，本来就在内存里。
+     */
+    function listOtherSessions(ctx, scope, limit) {
+      try {
+        const sessions = serviceOf(ctx, 'sessions');
+        const snap = sessions && sessions.list && sessions.list.getSnapshot
+          ? sessions.list.getSnapshot()
+          : null;
+        const byId = snap && snap.byId;
+        if (!byId) return [];
+        const rows = Object.keys(byId)
+          .map((id) => byId[id])
+          .filter((row) => row && row.id
+            && row.id !== scope.sessionId
+            && !row.blank
+            && row.origin !== 'subagent')
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+          .slice(0, Math.max(0, limit));
+        return rows.map((row) => ({
+          sessionId: row.id,
+          snippet: row.displayTitle || row.title || row.id,
+        }));
+      } catch {
+        return [];
+      }
+    }
+
+    /**
      * 消息检索总入口：当前会话 + 其他会话。
      * 其他会话先用宿主的会话级搜索缩小候选，再逐个进去搜消息正文。
      */
@@ -236,6 +274,21 @@
       } catch (error) {
         otherDiag.push(`search 抛错: ${error && error.message ? error.message : String(error)}`);
         candidates = [];
+      }
+
+      // 宿主索引可能根本没开（见 listOtherSessions 的说明），也可能搜索
+      // 确实没有命中。两种情况下都退回列表枚举：多扫几个会话，总好过
+      // 让「其他会话」整组凭空消失。
+      if (!candidates.length) {
+        const listed = listOtherSessions(ctx, scope, otherLimit);
+        if (listed.length) {
+          candidates = listed;
+          otherDiag.push(`退回列表枚举 ${listed.length}`);
+        } else {
+          otherDiag.push(`列表里也没有其他会话(共 ${
+            Object.keys((serviceOf(ctx, 'sessions')?.list?.getSnapshot() || {}).byId || {}).length
+          })`);
+        }
       }
 
       // 3) 逐个钻进去搜正文
