@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="440" viewBox="0 0 880 440" role="img" aria-label="改造前：面板列表挤占工作区，只有五六条会话可见；改造后：面板收进「更多」，工作区显示十条以上">
+  <style>
+    .bg       { fill: #ffffff; }
+    .card     { fill: #f6f8fa; stroke: #d0d7de; }
+    .zone     { fill: #ffffff; stroke: #d8dee4; }
+    .workzone { fill: #f6faff; }
+    .divider  { stroke: #d0d7de; }
+    .title    { fill: #1f2328; font: 600 13.5px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .dim      { fill: #8b949e; font: 11px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .txt      { fill: #1f2328; font: 12.5px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .ghost    { fill: #8b949e; font: 12.5px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .squeezeT { fill: #cf222e; font: 11.5px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .gainT    { fill: #1a7f37; font: 11.5px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .boxBad   { fill: none; stroke: #cf222e; stroke-width: 1.4; stroke-dasharray: 5 4; }
+    .boxGood  { fill: none; stroke: #1a7f37; stroke-width: 1.4; stroke-dasharray: 5 4; }
+    .arrow    { stroke: #0969da; stroke-width: 2; fill: none; }
+    .arrowH   { fill: #0969da; }
+    .folder   { fill: #e3b341; }
+    
+    .icon     { stroke: #57606a; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .iconA    { stroke: #0969da; stroke-width: 1.5; fill: none; stroke-linecap: round; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="440" rx="10"/>
+  <text class="dim" x="40" y="20">示意图 · 非真实截图</text>
+
+  <!-- ================= 左：改造前 ================= -->
+  <text class="title" x="40" y="48">改造前</text>
+  <rect class="card" x="40" y="60" width="352" height="352" rx="8"/>
+  <rect class="zone" x="52" y="72" width="328" height="188" rx="6"/>
+
+  <text class="txt" x="70" y="96">插件</text>
+  <text class="txt" x="70" y="122">插件市场</text>
+  <text class="txt" x="70" y="148">归档会话</text>
+  <text class="txt" x="70" y="174">自动化任务</text>
+  <text class="txt" x="70" y="200">上下文洞察</text>
+  <text class="txt" x="70" y="226">技能中心</text>
+  <text class="ghost" x="70" y="250">记忆系统 …</text>
+
+  <rect class="boxBad" x="52" y="264" width="328" height="122" rx="6"/>
+  <text class="squeezeT" x="370" y="376" text-anchor="end">被压到约 130px</text>
+
+  <!-- 文件夹行 -->
+  <g transform="translate(70,286)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 A</text>
+  </g>
+  <g transform="translate(70,310)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 B</text>
+  </g>
+  <g transform="translate(70,334)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 C</text>
+  </g>
+  <text class="ghost" x="70" y="374">…</text>
+
+  <text class="dim" x="40" y="428">面板区约 266px，挤压下方会话列表</text>
+
+  <!-- ================= 中间箭头 ================= -->
+  <path class="arrow" d="M418 236 H452"/>
+  <path class="arrowH" d="M452 230 L464 236 L452 242 Z"/>
+
+  <!-- ================= 右：改造后 ================= -->
+  <text class="title" x="496" y="48">改造后</text>
+  <rect class="card" x="496" y="60" width="352" height="352" rx="8"/>
+  <rect class="zone" x="508" y="72" width="328" height="92" rx="6"/>
+
+  <text class="txt" x="526" y="96">插件</text>
+  <text class="txt" x="526" y="122">记忆系统</text>
+  <text class="txt" x="526" y="148">更多</text>
+
+  <line class="divider" x1="508" y1="168" x2="836" y2="168" stroke-width="1"/>
+  <rect class="workzone" x="508" y="169" width="328" height="200" rx="6" stroke="none"/>
+
+  <text class="txt" x="526" y="192">工作区</text>
+
+  <!-- 标题行图标：放大镜 / 齿轮 / 文件夹+ -->
+  <g transform="translate(700,182)">
+    <circle class="iconA" cx="5" cy="5" r="4"/>
+    <path class="iconA" d="M8.2 8.2 L11.5 11.5"/>
+  </g>
+  <g transform="translate(732,182)">
+    <circle class="icon" cx="5.5" cy="5.5" r="2.2"/>
+    <path class="icon" d="M5.5 0.8v1.6M5.5 8.6v1.6M0.8 5.5h1.6M8.6 5.5h1.6"/>
+  </g>
+  <g transform="translate(764,182)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <path class="iconA" d="M8 5.5v5M5.5 8h5"/>
+  </g>
+
+  <g transform="translate(526,214)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 A</text>
+  </g>
+  <g transform="translate(526,238)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 B</text>
+  </g>
+  <g transform="translate(526,262)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 C</text>
+  </g>
+  <g transform="translate(526,286)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 D</text>
+  </g>
+  <g transform="translate(526,310)">
+    <path class="folder" d="M0 3.5A2.5 2.5 0 0 1 2.5 1h4l2 2.5h5A2.5 2.5 0 0 1 16 6v6.5A2.5 2.5 0 0 1 13.5 15h-11A2.5 2.5 0 0 1 0 12.5z"/>
+    <text class="txt" x="24" y="13">项目 E</text>
+  </g>
+  <text class="ghost" x="526" y="350">…</text>
+
+  <rect class="boxGood" x="508" y="169" width="328" height="200" rx="6"/>
+  <text class="gainT" x="828" y="360" text-anchor="end">净增约 180px</text>
+
+  <text class="dim" x="496" y="428">面板区约 114px，查找入口就在工作区标题行</text>
+</svg>
