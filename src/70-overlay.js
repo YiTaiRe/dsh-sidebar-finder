@@ -11,6 +11,9 @@
         const abortRef = useRef(null);
         const bodyRef = useRef(null);
         const [bodyScrollable, setBodyScrollable] = useState(false);
+        // 是否已输入内容。提到这里是因为下面那个渐隐 effect 要用它当依赖：
+        // 空查询时浮层不渲染 .wf-body，bodyRef.current 拿不到节点。
+        const hasQuery = query.trim() !== '';
 
         // 打开期间让宿主的那一行（和列表）让位。
         // 除了写属性给 CSS 用，这里还直接改内联样式 —— 属性选择器一旦因为
@@ -25,7 +28,6 @@
         useEffect(() => {
           const node = document.querySelector(SEL_SIDEBAR);
           if (!node) return undefined;
-          const hasQuery = query.trim() !== '';
           if (!isOpen) node.removeAttribute('data-wf-open');
           else node.setAttribute('data-wf-open', hasQuery ? 'all' : 'head');
           return () => {
@@ -153,7 +155,13 @@
           const ro = new ResizeObserver(update);
           ro.observe(el);
           return () => ro.disconnect();
-        }, [isOpen, query, mode, state, box]);
+          // 依赖只留 isOpen 与 hasQuery。内容尺寸变化由 ResizeObserver 自己盯着，
+          // 不需要把 state / box / query / mode 都列进来 —— 原来每来一次搜索结果
+          // （state 是新对象）都会重建一次观察者，搜索期间一次输入能触发好几轮。
+          // 但 hasQuery 必须留：空查询时 .wf-body 根本不渲染，bodyRef.current 是
+          // null，这次 effect 会提前返回；只有 hasQuery 由 false 翻成 true 才会
+          // 重跑，那时节点才存在，观察者才建得起来。
+        }, [isOpen, hasQuery]);
 
         if (!isOpen) return null;
 
@@ -161,7 +169,6 @@
         // 只有真的输入了内容，才在列表位置盖上来显示匹配结果。
         // 原生 deriveSearchResults 第一行就是 if (q === "") return { items: [] }，
         // 空查询不产生任何结果，列表也就不会被替换 —— 这里保持一致。
-        const hasQuery = query.trim() !== '';
         const style = box
           ? {
             position: 'fixed',

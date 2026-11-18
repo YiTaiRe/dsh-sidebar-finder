@@ -211,21 +211,42 @@ window.__ModuleLoader__.load({
         try {
           const x = Math.round(sidebarBox.left + Math.min(24, sidebarBox.width * 0.5));
           if (x > sidebarBox.left + 1 && x < sidebarBox.right - 1) {
+            // 分两段扫，别再从下往上每 2px 问一次浏览器。
+            // 侧边栏高 800px 就是约 380 次 elementFromPoint，每次都会强制
+            // 同步布局；而这个测量在打开浮层时要跑 4 遍（0 / 60 / 220 / 600ms），
+            // 合计约 1500 次 —— 打开搜索那一下的顿感就来自这里。
+            // 改成先 16px 粗扫定位「最上层已经不是我们」的那一段，
+            // 再回到该段下方 16px 内以 2px 细扫，精度不变、次数降到约 1/8。
             const bottomEdge = Math.floor(r.top + r.height) - 1;
-            let sawOther = 0;
-            let found = -1;
-            for (let y = bottomEdge; y > r.top + 40; y -= 2) {
+            const floorY = r.top + 40;
+            const probeIsMine = (y) => {
               const el = document.elementFromPoint(x, y);
-              if (!el) break;
-              const mine = typeof el.closest === 'function'
+              if (!el) return null;
+              return typeof el.closest === 'function'
                 ? el.closest('[data-wf-surface]')
                 : null;
-              if (mine) {
-                // 撞回自己了：只有当底下连着几行都不是自己时才算「真的被挡住」
-                if (sawOther >= 3) found = y;
-                break;
+            };
+            const COARSE = 16;
+            let coarseHit = -1;
+            for (let y = bottomEdge; y > floorY; y -= COARSE) {
+              if (probeIsMine(y)) break;
+              coarseHit = y;
+            }
+            let found = -1;
+            if (coarseHit > 0) {
+              // 从粗扫停在的位置往上细扫，找「连续 3 个非我方之后撞回自己」的那一行
+              let sawOther = 0;
+              const fineFloor = Math.max(floorY, coarseHit - COARSE * 2);
+              for (let y = coarseHit; y > fineFloor; y -= 2) {
+                const mine = probeIsMine(y);
+                if (mine === null) break;
+                if (mine) {
+                  // 撞回自己了：只有当底下连着几行都不是自己时才算「真的被挡住」
+                  if (sawOther >= 3) found = y;
+                  break;
+                }
+                sawOther += 1;
               }
-              sawOther += 1;
             }
             if (found > 0 && found < bottomLimit) bottomLimit = found;
           }
@@ -380,7 +401,6 @@ window.__ModuleLoader__.load({
           let stopped = false;
           let raf = 0;
           let last = '';
-          const settles = [];
 
           const apply = () => {
             if (stopped) return;
@@ -402,9 +422,22 @@ window.__ModuleLoader__.load({
           // 宿主的展开/收起是 width .18s 的过渡。收起后第一次重量就能拿到
           // 稳定基准（缓存进 measureHeaderSlot），所以这里只需要在动画结束后
           // 再补一次，确认最终位置 —— 补太多次会让每帧都重渲染，反而显得卡。
+          // 单一待定定时器，后一次覆盖前一次。
+          //
+          // 原来是 settles.push(setTimeout(apply, 210))，只 push 从不清理。
+          // 而 settle 挂在标题行父节点的 MutationObserver 上，还是 subtree 观察，
+          // 流式输出时宿主每帧都在改 DOM，settle 会被喊几十次 ——
+          // 于是几十个定时器同时在跑，210ms 后一起 apply()，
+          // 每个 apply 都要 querySelector ×3 + getBoundingClientRect（强制同步布局）。
+          // 这是「用起来卡卡的」最主要的一处。
+          let settleTimer = 0;
           const settle = () => {
             schedule();
-            settles.push(window.setTimeout(apply, 210));
+            if (settleTimer) window.clearTimeout(settleTimer);
+            settleTimer = window.setTimeout(() => {
+              settleTimer = 0;
+              apply();
+            }, 210);
           };
 
           apply();
@@ -441,7 +474,7 @@ window.__ModuleLoader__.load({
           return () => {
             stopped = true;
             if (raf) window.cancelAnimationFrame(raf);
-            settles.forEach((id) => window.clearTimeout(id));
+            if (settleTimer) window.clearTimeout(settleTimer);
             if (observer) observer.disconnect();
             window.removeEventListener('click', onClick, true);
             window.removeEventListener('resize', settle);
@@ -479,6 +512,9 @@ window.__ModuleLoader__.load({
         const abortRef = useRef(null);
         const bodyRef = useRef(null);
         const [bodyScrollable, setBodyScrollable] = useState(false);
+        // 是否已输入内容。提到这里是因为下面那个渐隐 effect 要用它当依赖：
+        // 空查询时浮层不渲染 .wf-body，bodyRef.current 拿不到节点。
+        const hasQuery = query.trim() !== '';
 
         // 打开期间让宿主的那一行（和列表）让位。
         // 除了写属性给 CSS 用，这里还直接改内联样式 —— 属性选择器一旦因为
@@ -493,7 +529,6 @@ window.__ModuleLoader__.load({
         useEffect(() => {
           const node = document.querySelector(SEL_SIDEBAR);
           if (!node) return undefined;
-          const hasQuery = query.trim() !== '';
           if (!isOpen) node.removeAttribute('data-wf-open');
           else node.setAttribute('data-wf-open', hasQuery ? 'all' : 'head');
           return () => {
@@ -621,7 +656,13 @@ window.__ModuleLoader__.load({
           const ro = new ResizeObserver(update);
           ro.observe(el);
           return () => ro.disconnect();
-        }, [isOpen, query, mode, state, box]);
+          // 依赖只留 isOpen 与 hasQuery。内容尺寸变化由 ResizeObserver 自己盯着，
+          // 不需要把 state / box / query / mode 都列进来 —— 原来每来一次搜索结果
+          // （state 是新对象）都会重建一次观察者，搜索期间一次输入能触发好几轮。
+          // 但 hasQuery 必须留：空查询时 .wf-body 根本不渲染，bodyRef.current 是
+          // null，这次 effect 会提前返回；只有 hasQuery 由 false 翻成 true 才会
+          // 重跑，那时节点才存在，观察者才建得起来。
+        }, [isOpen, hasQuery]);
 
         if (!isOpen) return null;
 
@@ -629,7 +670,6 @@ window.__ModuleLoader__.load({
         // 只有真的输入了内容，才在列表位置盖上来显示匹配结果。
         // 原生 deriveSearchResults 第一行就是 if (q === "") return { items: [] }，
         // 空查询不产生任何结果，列表也就不会被替换 —— 这里保持一致。
-        const hasQuery = query.trim() !== '';
         const style = box
           ? {
             position: 'fixed',
@@ -1467,12 +1507,26 @@ window.__ModuleLoader__.load({
         let hits = [];
         let scanned = 0;
         let first = true;
+        // 已经扫过的 seq。
+        // loadOlder() 之后新快照是「前面多了一段、后面的照旧」，
+        // 原来每翻一页都把整段重新抽文本、重新 toLowerCase、重新 indexOf 一遍。
+        // 翻到第 8 页时同一批文本已经被处理了 8 次 —— 长会话里
+        // 这就是搜索期间最明显的一处卡顿。按 seq 去重后每页只处理新增那段。
+        const seen = new Set();
         for (let page = 0; page <= maxPages; page += 1) {
           if (signal && signal.aborted) break;
           const snap = source.getSnapshot();
           const messages = messagesOf(snap && snap.entries);
           scanned = messages.length;
-          hits = matchMessages(messages, lowerQuery, maxHits);
+          const fresh = [];
+          for (const msg of messages) {
+            if (msg.seq != null) {
+              if (seen.has(msg.seq)) continue;
+              seen.add(msg.seq);
+            }
+            fresh.push(msg);
+          }
+          hits = matchMessages(fresh, lowerQuery, maxHits);
           if (hits.length) return { hits, scanned, truncated: false };
           if (!snap || !snap.hasMore) return { hits, scanned, truncated: false };
           if (page === maxPages) break;
@@ -2230,8 +2284,18 @@ ${SEL_SIDEBAR} nav[class*="_panelList"] {
     }
     function setVar(name, value) {
       if (varsDisposed) return;
-      if (value == null) runtimeVars.delete(name);
-      else runtimeVars.set(name, value);
+      // 值没变就别重建样式表。
+      // flushVars() 会把整张 <style> 的 textContent 重写一遍，浏览器要重新
+      // 解析规则、并可能触发整页样式重算。而 measureMoreAnchor 的轮询每
+      // 250ms 就调一次 write()，宽度其实早就不变了，白白重算了几十次。
+      const had = runtimeVars.has(name);
+      if (value == null) {
+        if (!had) return;
+        runtimeVars.delete(name);
+      } else {
+        if (had && runtimeVars.get(name) === value) return;
+        runtimeVars.set(name, value);
+      }
       flushVars();
     }
     function teardownVars() {

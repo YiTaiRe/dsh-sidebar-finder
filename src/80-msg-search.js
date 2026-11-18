@@ -121,12 +121,26 @@
         let hits = [];
         let scanned = 0;
         let first = true;
+        // 已经扫过的 seq。
+        // loadOlder() 之后新快照是「前面多了一段、后面的照旧」，
+        // 原来每翻一页都把整段重新抽文本、重新 toLowerCase、重新 indexOf 一遍。
+        // 翻到第 8 页时同一批文本已经被处理了 8 次 —— 长会话里
+        // 这就是搜索期间最明显的一处卡顿。按 seq 去重后每页只处理新增那段。
+        const seen = new Set();
         for (let page = 0; page <= maxPages; page += 1) {
           if (signal && signal.aborted) break;
           const snap = source.getSnapshot();
           const messages = messagesOf(snap && snap.entries);
           scanned = messages.length;
-          hits = matchMessages(messages, lowerQuery, maxHits);
+          const fresh = [];
+          for (const msg of messages) {
+            if (msg.seq != null) {
+              if (seen.has(msg.seq)) continue;
+              seen.add(msg.seq);
+            }
+            fresh.push(msg);
+          }
+          hits = matchMessages(fresh, lowerQuery, maxHits);
           if (hits.length) return { hits, scanned, truncated: false };
           if (!snap || !snap.hasMore) return { hits, scanned, truncated: false };
           if (page === maxPages) break;

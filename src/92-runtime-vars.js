@@ -53,8 +53,18 @@
     }
     function setVar(name, value) {
       if (varsDisposed) return;
-      if (value == null) runtimeVars.delete(name);
-      else runtimeVars.set(name, value);
+      // 值没变就别重建样式表。
+      // flushVars() 会把整张 <style> 的 textContent 重写一遍，浏览器要重新
+      // 解析规则、并可能触发整页样式重算。而 measureMoreAnchor 的轮询每
+      // 250ms 就调一次 write()，宽度其实早就不变了，白白重算了几十次。
+      const had = runtimeVars.has(name);
+      if (value == null) {
+        if (!had) return;
+        runtimeVars.delete(name);
+      } else {
+        if (had && runtimeVars.get(name) === value) return;
+        runtimeVars.set(name, value);
+      }
       flushVars();
     }
     function teardownVars() {

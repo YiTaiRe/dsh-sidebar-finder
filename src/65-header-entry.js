@@ -69,7 +69,6 @@
           let stopped = false;
           let raf = 0;
           let last = '';
-          const settles = [];
 
           const apply = () => {
             if (stopped) return;
@@ -91,9 +90,22 @@
           // 宿主的展开/收起是 width .18s 的过渡。收起后第一次重量就能拿到
           // 稳定基准（缓存进 measureHeaderSlot），所以这里只需要在动画结束后
           // 再补一次，确认最终位置 —— 补太多次会让每帧都重渲染，反而显得卡。
+          // 单一待定定时器，后一次覆盖前一次。
+          //
+          // 原来是 settles.push(setTimeout(apply, 210))，只 push 从不清理。
+          // 而 settle 挂在标题行父节点的 MutationObserver 上，还是 subtree 观察，
+          // 流式输出时宿主每帧都在改 DOM，settle 会被喊几十次 ——
+          // 于是几十个定时器同时在跑，210ms 后一起 apply()，
+          // 每个 apply 都要 querySelector ×3 + getBoundingClientRect（强制同步布局）。
+          // 这是「用起来卡卡的」最主要的一处。
+          let settleTimer = 0;
           const settle = () => {
             schedule();
-            settles.push(window.setTimeout(apply, 210));
+            if (settleTimer) window.clearTimeout(settleTimer);
+            settleTimer = window.setTimeout(() => {
+              settleTimer = 0;
+              apply();
+            }, 210);
           };
 
           apply();
@@ -130,7 +142,7 @@
           return () => {
             stopped = true;
             if (raf) window.cancelAnimationFrame(raf);
-            settles.forEach((id) => window.clearTimeout(id));
+            if (settleTimer) window.clearTimeout(settleTimer);
             if (observer) observer.disconnect();
             window.removeEventListener('click', onClick, true);
             window.removeEventListener('resize', settle);

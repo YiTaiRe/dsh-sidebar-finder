@@ -94,21 +94,42 @@
         try {
           const x = Math.round(sidebarBox.left + Math.min(24, sidebarBox.width * 0.5));
           if (x > sidebarBox.left + 1 && x < sidebarBox.right - 1) {
+            // 分两段扫，别再从下往上每 2px 问一次浏览器。
+            // 侧边栏高 800px 就是约 380 次 elementFromPoint，每次都会强制
+            // 同步布局；而这个测量在打开浮层时要跑 4 遍（0 / 60 / 220 / 600ms），
+            // 合计约 1500 次 —— 打开搜索那一下的顿感就来自这里。
+            // 改成先 16px 粗扫定位「最上层已经不是我们」的那一段，
+            // 再回到该段下方 16px 内以 2px 细扫，精度不变、次数降到约 1/8。
             const bottomEdge = Math.floor(r.top + r.height) - 1;
-            let sawOther = 0;
-            let found = -1;
-            for (let y = bottomEdge; y > r.top + 40; y -= 2) {
+            const floorY = r.top + 40;
+            const probeIsMine = (y) => {
               const el = document.elementFromPoint(x, y);
-              if (!el) break;
-              const mine = typeof el.closest === 'function'
+              if (!el) return null;
+              return typeof el.closest === 'function'
                 ? el.closest('[data-wf-surface]')
                 : null;
-              if (mine) {
-                // 撞回自己了：只有当底下连着几行都不是自己时才算「真的被挡住」
-                if (sawOther >= 3) found = y;
-                break;
+            };
+            const COARSE = 16;
+            let coarseHit = -1;
+            for (let y = bottomEdge; y > floorY; y -= COARSE) {
+              if (probeIsMine(y)) break;
+              coarseHit = y;
+            }
+            let found = -1;
+            if (coarseHit > 0) {
+              // 从粗扫停在的位置往上细扫，找「连续 3 个非我方之后撞回自己」的那一行
+              let sawOther = 0;
+              const fineFloor = Math.max(floorY, coarseHit - COARSE * 2);
+              for (let y = coarseHit; y > fineFloor; y -= 2) {
+                const mine = probeIsMine(y);
+                if (mine === null) break;
+                if (mine) {
+                  // 撞回自己了：只有当底下连着几行都不是自己时才算「真的被挡住」
+                  if (sawOther >= 3) found = y;
+                  break;
+                }
+                sawOther += 1;
               }
-              sawOther += 1;
             }
             if (found > 0 && found < bottomLimit) bottomLimit = found;
           }
